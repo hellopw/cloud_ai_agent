@@ -326,6 +326,15 @@ func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request, id string)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
+func (h *Handler) buildAgent(w http.ResponseWriter, r *http.Request, id string) {
+	if h.agentSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent service not initialized")
+		return
+	}
+	go h.agentSvc.BuildAgent(r.Context(), id)
+	writeJSON(w, http.StatusAccepted, map[string]string{"message": "build started"})
+}
+
 // --- Instances ---
 
 func (h *Handler) listInstances(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +357,19 @@ func (h *Handler) getInstance(w http.ResponseWriter, r *http.Request, id string)
 		return
 	}
 	writeJSON(w, http.StatusOK, i)
+}
+
+func (h *Handler) startInstance(w http.ResponseWriter, r *http.Request, id string) {
+	if h.agentSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent service not initialized")
+		return
+	}
+	instance, err := h.agentSvc.StartInstance(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, instance)
 }
 
 func (h *Handler) deleteInstance(w http.ResponseWriter, r *http.Request, id string) {

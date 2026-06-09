@@ -1,0 +1,11 @@
+{
+  "name": "cloud-agent-wrapper",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/server.js",
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.79.0",
+    "@earendil-works/pi-ai": "^0.79.0",
+    "express": "^4.21.0"
+  }
+}
