@@ -1,0 +1,365 @@
+package api
+
+import (
+	"net/http"
+
+	"cloud_ai_agent/internal/model"
+)
+
+// --- Prompts ---
+
+func (h *Handler) listPrompts(w http.ResponseWriter, r *http.Request) {
+	prompts, err := h.store.ListPrompts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, prompts)
+}
+
+func (h *Handler) getPrompt(w http.ResponseWriter, r *http.Request, id string) {
+	p, err := h.store.GetPrompt(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if p == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (h *Handler) createPrompt(w http.ResponseWriter, r *http.Request) {
+	var p model.Prompt
+	if err := decodeJSON(r, &p); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreatePrompt(&p); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, p)
+}
+
+func (h *Handler) updatePrompt(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetPrompt(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var p model.Prompt
+	if err := decodeJSON(r, &p); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	p.ID = existing.ID
+	if err := h.store.UpdatePrompt(&p); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (h *Handler) deletePrompt(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeletePrompt(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+// --- Skills ---
+
+func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request) {
+	skills, err := h.store.ListSkills()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, skills)
+}
+
+func (h *Handler) getSkill(w http.ResponseWriter, r *http.Request, id string) {
+	s, err := h.store.GetSkill(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if s == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (h *Handler) createSkill(w http.ResponseWriter, r *http.Request) {
+	var s model.Skill
+	if err := decodeJSON(r, &s); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateSkill(&s); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, s)
+}
+
+func (h *Handler) updateSkill(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetSkill(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var s model.Skill
+	if err := decodeJSON(r, &s); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.ID = existing.ID
+	if err := h.store.UpdateSkill(&s); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s)
+}
+
+func (h *Handler) deleteSkill(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteSkill(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+// --- Tools ---
+
+func (h *Handler) listTools(w http.ResponseWriter, r *http.Request) {
+	tools, err := h.store.ListTools()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, tools)
+}
+
+func (h *Handler) getTool(w http.ResponseWriter, r *http.Request, id string) {
+	t, err := h.store.GetTool(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if t == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (h *Handler) createTool(w http.ResponseWriter, r *http.Request) {
+	var t model.Tool
+	if err := decodeJSON(r, &t); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateTool(&t); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, t)
+}
+
+func (h *Handler) updateTool(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetTool(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var t model.Tool
+	if err := decodeJSON(r, &t); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	t.ID = existing.ID
+	if err := h.store.UpdateTool(&t); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (h *Handler) deleteTool(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteTool(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+// --- Templates ---
+
+type bindRequest struct {
+	PromptIDs []string `json:"prompt_ids"`
+	SkillIDs  []string `json:"skill_ids"`
+	ToolIDs   []string `json:"tool_ids"`
+}
+
+func (h *Handler) listTemplates(w http.ResponseWriter, r *http.Request) {
+	templates, err := h.store.ListTemplates()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, templates)
+}
+
+func (h *Handler) getTemplate(w http.ResponseWriter, r *http.Request, id string) {
+	t, err := h.store.GetTemplate(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if t == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (h *Handler) createTemplate(w http.ResponseWriter, r *http.Request) {
+	var t model.Template
+	if err := decodeJSON(r, &t); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateTemplate(&t); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, t)
+}
+
+func (h *Handler) updateTemplate(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetTemplate(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var t model.Template
+	if err := decodeJSON(r, &t); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	t.ID = existing.ID
+	if err := h.store.UpdateTemplate(&t); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (h *Handler) deleteTemplate(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteTemplate(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+func (h *Handler) updateTemplateBindings(w http.ResponseWriter, r *http.Request, id string) {
+	var req bindRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.UpdateTemplateBindings(id, req.PromptIDs, req.SkillIDs, req.ToolIDs); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "bindings updated"})
+}
+
+// --- Agents ---
+
+func (h *Handler) listAgents(w http.ResponseWriter, r *http.Request) {
+	agents, err := h.store.ListAgents()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agents)
+}
+
+func (h *Handler) getAgent(w http.ResponseWriter, r *http.Request, id string) {
+	a, err := h.store.GetAgent(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if a == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request) {
+	var a model.Agent
+	if err := decodeJSON(r, &a); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateAgent(&a); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, a)
+}
+
+func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteAgent(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+// --- Instances ---
+
+func (h *Handler) listInstances(w http.ResponseWriter, r *http.Request) {
+	instances, err := h.store.ListInstances()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, instances)
+}
+
+func (h *Handler) getInstance(w http.ResponseWriter, r *http.Request, id string) {
+	i, err := h.store.GetInstance(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if i == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, i)
+}
+
+func (h *Handler) deleteInstance(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteInstance(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+// --- Health ---
+
+func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}

@@ -2,11 +2,13 @@
 pi/
 
 # Go
+backend/server.exe
 backend/tmp/
+backend/data/
 *.exe
 *.test
 
-# Node.js
+# Node.js / Frontend
 node_modules/
 dist/
 
@@ -19,4 +21,3 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
-
