@@ -17,6 +17,7 @@ export default function AgentsPage() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', template_id: '', repo_url: '', branch: 'main' })
   const [creating, setCreating] = useState(false)
+  const [building, setBuilding] = useState('')
 
   const load = async () => {
     try {
@@ -34,6 +35,15 @@ export default function AgentsPage() {
     finally { setCreating(false) }
   }
 
+  const handleBuild = async (id: string) => {
+    setBuilding(id)
+    try {
+      await fetch(`/api/agents/${id}/build`, { method: 'POST' })
+      setTimeout(load, 2000)
+    } catch (e: any) { setError(e.message) }
+    finally { setBuilding('') }
+  }
+
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete agent "${name}"?`)) return; await agentsApi.delete(id); load()
   }
@@ -44,7 +54,9 @@ export default function AgentsPage() {
     <div>
       <div className="page-header">
         <h2>Agents</h2>
-        <button onClick={() => setShowForm(!showForm)} className="btn btn-primary">{showForm ? 'Cancel' : '+ New Agent'}</button>
+        <button onClick={() => setShowForm(!showForm)} className="btn btn-primary">
+          {showForm ? 'Cancel' : '+ New Agent'}
+        </button>
       </div>
       {error && <p style={{ color: 'var(--danger)', marginBottom: 12 }}>{error}</p>}
 
@@ -81,9 +93,15 @@ export default function AgentsPage() {
             <h3>{a.name} <span className={`tag ${statusClass(a.status)}`}>{a.status}</span></h3>
             <p>{a.repo_url} ({a.branch})</p>
             {a.error_msg && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{a.error_msg}</p>}
+            {a.image_tag && <p style={{ fontSize: 11, color: 'var(--text-muted)' }}>Image: {a.image_tag}</p>}
             <p style={{ fontSize: 11, marginTop: 4 }}>Created: {new Date(a.created_at).toLocaleString()}</p>
           </div>
           <div className="card-actions">
+            {(a.status === 'draft' || a.status === 'failed') && (
+              <button onClick={() => handleBuild(a.id)} disabled={building === a.id} className="btn btn-primary">
+                {building === a.id ? 'Building...' : 'Build'}
+              </button>
+            )}
             <button onClick={() => handleDelete(a.id, a.name)} className="btn btn-danger">Delete</button>
           </div>
         </div>

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"cloud_ai_agent/internal/proxy"
 	"cloud_ai_agent/internal/service"
 	"cloud_ai_agent/internal/store"
 )
@@ -131,10 +132,15 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 	mux.HandleFunc("/api/instances/", func(w http.ResponseWriter, r *http.Request) {
-		id := strings.TrimPrefix(r.URL.Path, "/api/instances/")
+		path := strings.TrimPrefix(r.URL.Path, "/api/instances/")
+		if strings.HasSuffix(path, "/chat") {
+			id := strings.TrimSuffix(path, "/chat")
+			proxy.HandleChat("localhost", h.getInstancePort(id))(w, r)
+			return
+		}
 		switch r.Method {
-		case "GET": h.getInstance(w, r, id)
-		case "DELETE": h.deleteInstance(w, r, id)
+		case "GET": h.getInstance(w, r, path)
+		case "DELETE": h.deleteInstance(w, r, path)
 		default: methodNotAllowed(w)
 		}
 	})
@@ -142,6 +148,12 @@ func NewRouter(h *Handler) http.Handler {
 	mux.HandleFunc("/api/health", h.health)
 
 	return corsMiddleware(mux)
+}
+
+func (h *Handler) getInstancePort(id string) int {
+	inst, err := h.store.GetInstance(id)
+	if err != nil || inst == nil { return 3001 }
+	return inst.HostPort
 }
 
 func corsMiddleware(next http.Handler) http.Handler {

@@ -9,6 +9,7 @@ import TemplatesPage from './pages/TemplatesPage'
 import TemplateEditPage from './pages/TemplateEditPage'
 import AgentsPage from './pages/AgentsPage'
 import InstancesPage from './pages/InstancesPage'
+import ChatPage from './pages/ChatPage'
 
 const navItems = [
   { to: '/prompts', label: 'Prompts' },
@@ -49,6 +50,7 @@ function App() {
           <Route path="/templates/:id" element={<TemplateEditPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/instances" element={<InstancesPage />} />
+          <Route path="/instances/:id/chat" element={<ChatPage />} />
         </Routes>
       </main>
     </div>
