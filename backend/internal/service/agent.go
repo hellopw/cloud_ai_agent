@@ -47,12 +47,14 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 		return err
 	}
 
+	// Clone code repository
 	repoDir := filepath.Join(buildDir, "repo")
 	if err := svc.git.Clone(ctx, agent.RepoURL, agent.Branch, repoDir); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", "git clone: "+err.Error())
 		return err
 	}
 
+	// Generate Dockerfile
 	dockerfile, err := codegen.GenerateDockerfile(&codegen.DockerfileData{
 		CustomContent: tmpl.DockerfileContent,
 	})
@@ -65,21 +67,31 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 		return err
 	}
 
-	if err := copyDir("container-wrapper", filepath.Join(buildDir, "container-wrapper")); err != nil {
+	// Copy wrapper server.js to build context root (Dockerfile expects it there)
+	wrapperSrc := filepath.Join("container-wrapper", "src", "server.js")
+	wrapperData, err := os.ReadFile(wrapperSrc)
+	if err != nil {
+		svc.store.UpdateAgentStatus(agentID, "failed", "", "read wrapper: "+err.Error())
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "server.js"), wrapperData, 0644); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
 		return err
 	}
 
+	// Generate tool extensions
 	if err := svc.writeToolExtensions(buildDir, tmpl.ToolIDs); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
 		return err
 	}
 
+	// Write prompts and skills
 	if err := svc.writePromptsSkills(buildDir, tmpl.PromptIDs, tmpl.SkillIDs); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
 		return err
 	}
 
+	// Build Docker image
 	imageTag := fmt.Sprintf("cloud-agent/%s:latest", agentID)
 	if err := svc.docker.BuildImage(ctx, buildDir, imageTag); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", "docker build: "+err.Error())
@@ -122,22 +134,10 @@ func (svc *AgentService) writePromptsSkills(buildDir string, promptIDs, skillIDs
 			s, err := svc.store.GetSkill(sid)
 			if err != nil || s == nil { continue }
 			content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s", s.Name, s.Description, s.Content)
-			os.WriteFile(filepath.Join(skillsDir, "SKILL.md"), []byte(content), 0644)
+			os.WriteFile(filepath.Join(skillsDir, s.Name+".md"), []byte(content), 0644)
 		}
 	}
 	return nil
-}
-
-func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil { return err }
-		relPath, _ := filepath.Rel(src, path)
-		targetPath := filepath.Join(dst, relPath)
-		if info.IsDir() { return os.MkdirAll(targetPath, info.Mode()) }
-		data, err := os.ReadFile(path)
-		if err != nil { return err }
-		return os.WriteFile(targetPath, data, info.Mode())
-	})
 }
 
 func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*model.Instance, error) {
