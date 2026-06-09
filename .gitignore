@@ -1,0 +1,22 @@
+# pi agent runtime (external reference, cloned from https://github.com/earendil-works/pi)
+pi/
+
+# Go
+backend/tmp/
+*.exe
+*.test
+
+# Node.js
+node_modules/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
