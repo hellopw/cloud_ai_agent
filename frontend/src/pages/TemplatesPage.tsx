@@ -6,6 +6,7 @@ export default function TemplatesPage() {
   const [items, setItems] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [expandedDf, setExpandedDf] = useState<string | null>(null)
   const load = async () => {
     try { setItems(await templatesApi.list()); setError('') }
     catch (e: any) { setError(e.message) }
@@ -15,6 +16,8 @@ export default function TemplatesPage() {
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`Delete template "${name}"?`)) return; await templatesApi.delete(id); load()
   }
+  const toggleDockerfile = (id: string) => setExpandedDf(expandedDf === id ? null : id)
+
   if (loading) return <div className="content"><p>Loading...</p></div>
   return (
     <div>
@@ -28,6 +31,17 @@ export default function TemplatesPage() {
             <h3>{t.name}</h3>
             <p>{t.description || 'No description'}</p>
             <p style={{ fontSize: 11, marginTop: 4 }}>Updated: {new Date(t.updated_at).toLocaleString()}</p>
+            <button
+              onClick={() => toggleDockerfile(t.id)}
+              style={{ marginTop: 8, background: "none", border: "1px solid var(--border)", color: "var(--text-muted)", borderRadius: 4, padding: "2px 10px", cursor: "pointer", fontSize: 12 }}
+            >
+              {expandedDf === t.id ? "Hide Dockerfile" : "View Dockerfile"}
+            </button>
+            {expandedDf === t.id && (
+              <pre style={{ marginTop: 8, maxHeight: 300, overflow: "auto", fontSize: 12 }}>
+                {t.dockerfile_content || "(empty)"}
+              </pre>
+            )}
           </div>
           <div className="card-actions">
             <Link to={`/templates/${t.id}`} className="btn btn-ghost">Edit</Link>

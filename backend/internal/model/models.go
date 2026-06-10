@@ -43,16 +43,18 @@ type Template struct {
 }
 
 type Agent struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	TemplateID string    `json:"template_id"`
-	RepoURL    string    `json:"repo_url"`
-	Branch     string    `json:"branch"`
-	ImageTag   string    `json:"image_tag"`
-	Status     string    `json:"status"`
-	ErrorMsg   string    `json:"error_msg,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	TemplateID  string    `json:"template_id"`
+	RepoURL     string    `json:"repo_url"`
+	Branch      string    `json:"branch"`
+	GitUsername string    `json:"git_username,omitempty"`
+	GitPassword string    `json:"git_password,omitempty"`
+	ImageTag    string    `json:"image_tag"`
+	Status      string    `json:"status"`
+	ErrorMsg    string    `json:"error_msg,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Instance struct {

@@ -1,7 +1,10 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"cloud_ai_agent/internal/model"
 )
@@ -318,6 +321,36 @@ func (h *Handler) createAgent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, a)
 }
 
+func (h *Handler) updateAgent(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetAgent(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if existing.Status != "draft" && existing.Status != "failed" {
+		writeError(w, http.StatusConflict, "can only edit draft or failed agents")
+		return
+	}
+	var a model.Agent
+	if err := decodeJSON(r, &a); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.ID = existing.ID
+	a.Status = existing.Status
+	a.ImageTag = existing.ImageTag
+	a.ErrorMsg = existing.ErrorMsg
+	a.CreatedAt = existing.CreatedAt
+	// Preserve credentials if not re-submitted (empty string means keep existing)
+	if a.GitUsername == "" { a.GitUsername = existing.GitUsername }
+	if a.GitPassword == "" { a.GitPassword = existing.GitPassword }
+	if err := h.store.UpdateAgent(&a); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
 func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request, id string) {
 	if err := h.store.DeleteAgent(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -326,12 +359,26 @@ func (h *Handler) deleteAgent(w http.ResponseWriter, r *http.Request, id string)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
+func (h *Handler) getBuildLog(w http.ResponseWriter, r *http.Request, id string) {
+	logPath := filepath.Join("..", "builds", id, "build.log")
+	if os.Getenv("PROJECT_ROOT") != "" {
+		logPath = filepath.Join(os.Getenv("PROJECT_ROOT"), "builds", id, "build.log")
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "build log not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(data)
+}
+
 func (h *Handler) buildAgent(w http.ResponseWriter, r *http.Request, id string) {
 	if h.agentSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "agent service not initialized")
 		return
 	}
-	go h.agentSvc.BuildAgent(r.Context(), id)
+	go h.agentSvc.BuildAgent(context.Background(), id)
 	writeJSON(w, http.StatusAccepted, map[string]string{"message": "build started"})
 }
 

@@ -16,7 +16,7 @@ func (s *Store) ListTools() ([]model.Tool, error) {
 	}
 	defer rows.Close()
 
-	var tools []model.Tool
+	tools := make([]model.Tool, 0)
 	for rows.Next() {
 		var t model.Tool
 		if err := rows.Scan(&t.ID, &t.Name, &t.Label, &t.Description, &t.DSLDefinition, &t.CreatedAt, &t.UpdatedAt); err != nil {

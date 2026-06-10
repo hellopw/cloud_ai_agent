@@ -16,7 +16,7 @@ func (s *Store) ListPrompts() ([]model.Prompt, error) {
 	}
 	defer rows.Close()
 
-	var prompts []model.Prompt
+	prompts := make([]model.Prompt, 0)
 	for rows.Next() {
 		var p model.Prompt
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Content, &p.CreatedAt, &p.UpdatedAt); err != nil {

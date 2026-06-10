@@ -108,6 +108,11 @@ func NewRouter(h *Handler) http.Handler {
 	})
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+		if strings.HasSuffix(path, "/log") {
+			id := strings.TrimSuffix(path, "/log")
+			if r.Method == "GET" { h.getBuildLog(w, r, id) } else { methodNotAllowed(w) }
+			return
+		}
 		if strings.HasSuffix(path, "/build") {
 			id := strings.TrimSuffix(path, "/build")
 			if r.Method == "POST" { h.buildAgent(w, r, id) } else { methodNotAllowed(w) }
@@ -120,6 +125,7 @@ func NewRouter(h *Handler) http.Handler {
 		}
 		switch r.Method {
 		case "GET": h.getAgent(w, r, path)
+		case "PUT": h.updateAgent(w, r, path)
 		case "DELETE": h.deleteAgent(w, r, path)
 		default: methodNotAllowed(w)
 		}

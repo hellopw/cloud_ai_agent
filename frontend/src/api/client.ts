@@ -54,6 +54,7 @@ export const agentsApi = {
   list: () => request('/agents'),
   get: (id: string) => request(`/agents/${id}`),
   create: (data: any) => request('/agents', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/agents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => request(`/agents/${id}`, { method: 'DELETE' }),
 }
 

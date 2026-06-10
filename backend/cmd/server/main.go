@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ func envOrDefault(key, def string) string {
 
 func main() {
 	dbPath := envOrDefault("DB_PATH", "data/cloud_ai_agent.db")
+	frontendDir := envOrDefault("FRONTEND_DIR", "frontend")
 
 	s, err := store.New(dbPath)
 	if err != nil { log.Fatalf("Failed to open database: %v", err) }
@@ -33,12 +36,30 @@ func main() {
 	agentSvc := service.NewAgentService(s)
 	h.WithAgentService(agentSvc)
 
-	mux := api.NewRouter(h)
+	apiMux := api.NewRouter(h)
+	fs := http.FileServer(http.Dir(frontendDir))
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api") {
+			apiMux.ServeHTTP(w, r)
+			return
+		}
+		// Check if file exists, otherwise serve index.html for SPA routing
+		filePath := filepath.Join(frontendDir, r.URL.Path)
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			http.ServeFile(w, r, filepath.Join(frontendDir, "index.html"))
+			return
+		}
+		fs.ServeHTTP(w, r)
+	})
+
 	port := envOrDefault("PORT", "8080")
-	srv := &http.Server{Addr: ":" + port, Handler: mux}
+	srv := &http.Server{Addr: ":" + port, Handler: handler}
 
 	go func() {
 		log.Printf("Server starting on :%s", port)
+		log.Printf("Frontend dir: %s", frontendDir)
+		log.Printf("DB path: %s", dbPath)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start server: %v", err)
 		}
@@ -50,5 +71,5 @@ func main() {
 	log.Println("Shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil { log.Fatalf("Server forced shutdown: %v", err) }
+	if err := srv.Shutdown(ctx); err != nil { log.Fatalf("Failed to server shutdown: %v", err) }
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"io"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,16 +15,26 @@ import (
 )
 
 type AgentService struct {
-	store  *store.Store
-	docker *dockersvc.Service
-	git    *gitsvc.Service
+	store       *store.Store
+	docker      *dockersvc.Service
+	git         *gitsvc.Service
+	projectRoot string
 }
 
 func NewAgentService(s *store.Store) *AgentService {
+	// PROJECT_ROOT env var overrides auto-detection
+	projectRoot := os.Getenv("PROJECT_ROOT")
+	if projectRoot == "" {
+		projectRoot = ".."
+		if _, err := os.Stat(filepath.Join(projectRoot, "container-wrapper", "src", "server.js")); os.IsNotExist(err) {
+			projectRoot = "."
+		}
+	}
 	return &AgentService{
-		store:  s,
-		docker: dockersvc.NewService("builds"),
-		git:    gitsvc.NewService(),
+		store:       s,
+		docker:      dockersvc.NewService(filepath.Join(projectRoot, "builds")),
+		git:         gitsvc.NewService(),
+		projectRoot: projectRoot,
 	}
 }
 
@@ -40,16 +51,26 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 
 	svc.store.UpdateAgentStatus(agentID, "building", "", "")
 
-	buildDir := filepath.Join("builds", agentID)
+	buildDir := filepath.Join(svc.projectRoot, "builds", agentID)
 	os.RemoveAll(buildDir)
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
 		return err
 	}
 
+	// Open build log file
+	logPath := filepath.Join(buildDir, "build.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
+		return err
+	}
+	defer logFile.Close()
+	logWriter := io.MultiWriter(logFile, os.Stdout)
+
 	// Clone code repository
 	repoDir := filepath.Join(buildDir, "repo")
-	if err := svc.git.Clone(ctx, agent.RepoURL, agent.Branch, repoDir); err != nil {
+	if err := svc.git.Clone(ctx, agent.RepoURL, agent.Branch, repoDir, agent.GitUsername, agent.GitPassword, logWriter); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", "git clone: "+err.Error())
 		return err
 	}
@@ -68,7 +89,7 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 	}
 
 	// Copy wrapper server.js to build context root (Dockerfile expects it there)
-	wrapperSrc := filepath.Join("container-wrapper", "src", "server.js")
+	wrapperSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "server.js")
 	wrapperData, err := os.ReadFile(wrapperSrc)
 	if err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", "read wrapper: "+err.Error())
@@ -93,7 +114,7 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 
 	// Build Docker image
 	imageTag := fmt.Sprintf("cloud-agent/%s:latest", agentID)
-	if err := svc.docker.BuildImage(ctx, buildDir, imageTag); err != nil {
+	if err := svc.docker.BuildImage(ctx, buildDir, imageTag, logWriter); err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", "docker build: "+err.Error())
 		return err
 	}
@@ -103,9 +124,9 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 }
 
 func (svc *AgentService) writeToolExtensions(buildDir string, toolIDs []string) error {
-	if len(toolIDs) == 0 { return nil }
 	extDir := filepath.Join(buildDir, "extensions")
 	if err := os.MkdirAll(extDir, 0755); err != nil { return err }
+	if len(toolIDs) == 0 { return nil }
 	for _, tid := range toolIDs {
 		tool, err := svc.store.GetTool(tid)
 		if err != nil { continue }
@@ -117,9 +138,9 @@ func (svc *AgentService) writeToolExtensions(buildDir string, toolIDs []string) 
 }
 
 func (svc *AgentService) writePromptsSkills(buildDir string, promptIDs, skillIDs []string) error {
+	promptsDir := filepath.Join(buildDir, "pi-prompts")
+	os.MkdirAll(promptsDir, 0755)
 	if len(promptIDs) > 0 {
-		promptsDir := filepath.Join(buildDir, "pi-prompts")
-		os.MkdirAll(promptsDir, 0755)
 		for _, pid := range promptIDs {
 			p, err := svc.store.GetPrompt(pid)
 			if err != nil || p == nil { continue }
@@ -127,9 +148,9 @@ func (svc *AgentService) writePromptsSkills(buildDir string, promptIDs, skillIDs
 			os.WriteFile(filepath.Join(promptsDir, p.Name+".md"), []byte(content), 0644)
 		}
 	}
+	skillsDir := filepath.Join(buildDir, "pi-skills")
+	os.MkdirAll(skillsDir, 0755)
 	if len(skillIDs) > 0 {
-		skillsDir := filepath.Join(buildDir, "pi-skills")
-		os.MkdirAll(skillsDir, 0755)
 		for _, sid := range skillIDs {
 			s, err := svc.store.GetSkill(sid)
 			if err != nil || s == nil { continue }
@@ -158,7 +179,7 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*mo
 			"ANTHROPIC_API_KEY": os.Getenv("ANTHROPIC_API_KEY"),
 		}
 		_, err := svc.docker.RunContainer(ctx, agent.ImageTag, containerName,
-			filepath.Join("builds", agentID, "repo"), port, env)
+			filepath.Join(svc.projectRoot, "builds", agentID, "repo"), port, env)
 		if err != nil {
 			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0)
 			return

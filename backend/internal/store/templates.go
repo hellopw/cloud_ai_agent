@@ -16,7 +16,7 @@ func (s *Store) ListTemplates() ([]model.Template, error) {
 	}
 	defer rows.Close()
 
-	var templates []model.Template
+	templates := make([]model.Template, 0)
 	for rows.Next() {
 		var t model.Template
 		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.DockerfileContent, &t.CreatedAt, &t.UpdatedAt); err != nil {

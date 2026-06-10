@@ -21,3 +21,8 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Build output
+builds/
+deploy/
+test_clone*/

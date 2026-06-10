@@ -16,7 +16,7 @@ func (s *Store) ListSkills() ([]model.Skill, error) {
 	}
 	defer rows.Close()
 
-	var skills []model.Skill
+	skills := make([]model.Skill, 0)
 	for rows.Next() {
 		var sk model.Skill
 		if err := rows.Scan(&sk.ID, &sk.Name, &sk.Description, &sk.Content, &sk.CreatedAt, &sk.UpdatedAt); err != nil {

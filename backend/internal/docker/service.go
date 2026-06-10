@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,7 @@ func NewService(workDir string) *Service {
 	return &Service{workDir: workDir}
 }
 
-func (s *Service) BuildImage(ctx context.Context, buildDir, imageTag string) error {
+func (s *Service) BuildImage(ctx context.Context, buildDir, imageTag string, logWriter io.Writer) error {
 	dockerfile := filepath.Join(buildDir, "Dockerfile")
 	if _, err := os.Stat(dockerfile); os.IsNotExist(err) {
 		return fmt.Errorf("Dockerfile not found in %s", buildDir)
@@ -28,8 +29,8 @@ func (s *Service) BuildImage(ctx context.Context, buildDir, imageTag string) err
 		"-f", dockerfile,
 		buildDir,
 	)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
 
 	return cmd.Run()
 }

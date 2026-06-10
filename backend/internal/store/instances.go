@@ -16,7 +16,7 @@ func (s *Store) ListInstances() ([]model.Instance, error) {
 	}
 	defer rows.Close()
 
-	var instances []model.Instance
+	instances := make([]model.Instance, 0)
 	for rows.Next() {
 		var i model.Instance
 		if err := rows.Scan(&i.ID, &i.AgentID, &i.ContainerID, &i.HostPort, &i.Status, &i.CreatedAt, &i.UpdatedAt); err != nil {

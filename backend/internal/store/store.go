@@ -97,16 +97,18 @@ func (s *Store) Migrate() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS agents (
-		id          TEXT PRIMARY KEY,
-		name        TEXT NOT NULL,
-		template_id TEXT NOT NULL REFERENCES templates(id),
-		repo_url    TEXT NOT NULL DEFAULT '',
-		branch      TEXT NOT NULL DEFAULT 'main',
-		image_tag   TEXT DEFAULT '',
-		status      TEXT NOT NULL DEFAULT 'draft',
-		error_msg   TEXT DEFAULT '',
-		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		id           TEXT PRIMARY KEY,
+		name         TEXT NOT NULL,
+		template_id  TEXT NOT NULL REFERENCES templates(id),
+		repo_url     TEXT NOT NULL DEFAULT '',
+		git_username TEXT DEFAULT '',
+		git_password TEXT DEFAULT '',
+		branch       TEXT NOT NULL DEFAULT 'main',
+		image_tag    TEXT DEFAULT '',
+		status       TEXT NOT NULL DEFAULT 'draft',
+		error_msg    TEXT DEFAULT '',
+		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS instances (
@@ -119,6 +121,12 @@ func (s *Store) Migrate() error {
 		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 	`
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Migration: add git auth columns for existing databases
+	s.db.Exec("ALTER TABLE agents ADD COLUMN git_username TEXT DEFAULT ''")
+	s.db.Exec("ALTER TABLE agents ADD COLUMN git_password TEXT DEFAULT ''")
+	return nil
 }
