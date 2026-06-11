@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -411,7 +412,11 @@ func (h *Handler) startInstance(w http.ResponseWriter, r *http.Request, id strin
 		writeError(w, http.StatusServiceUnavailable, "agent service not initialized")
 		return
 	}
-	instance, err := h.agentSvc.StartInstance(r.Context(), id)
+	var req struct {
+		ProviderConfigID string `json:"provider_config_id"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+	instance, err := h.agentSvc.StartInstance(r.Context(), id, req.ProviderConfigID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

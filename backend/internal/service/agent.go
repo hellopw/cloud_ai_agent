@@ -179,7 +179,7 @@ func (svc *AgentService) writePromptsSkills(buildDir string, promptIDs, skillIDs
 	return nil
 }
 
-func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*model.Instance, error) {
+func (svc *AgentService) StartInstance(ctx context.Context, agentID, providerConfigID string) (*model.Instance, error) {
 	agent, err := svc.store.GetAgent(agentID)
 	if err != nil || agent == nil { return nil, fmt.Errorf("agent not found") }
 	if agent.Status != "ready" { return nil, fmt.Errorf("agent not ready: %s", agent.Status) }
@@ -197,6 +197,20 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*mo
 			"AGENT_MODEL":    os.Getenv("AGENT_MODEL"),
 			"AGENT_API_KEY":  os.Getenv("AGENT_API_KEY"),
 			"AGENT_BASE_URL": os.Getenv("AGENT_BASE_URL"),
+		}
+		// Provider config from request overrides env vars
+		if providerConfigID != "" {
+			pc, err := svc.store.GetProviderConfig(providerConfigID)
+			if err == nil && pc != nil {
+				env["AGENT_PROVIDER"] = pc.Provider
+				env["AGENT_MODEL"] = pc.ModelID
+				if pc.APIKey != "" {
+					env["AGENT_API_KEY"] = pc.APIKey
+				}
+				if pc.BaseURL != "" {
+					env["AGENT_BASE_URL"] = pc.BaseURL
+				}
+			}
 		}
 		repoAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", agentID, "repo"))
 		_, err := svc.docker.RunContainer(ctx, agent.ImageTag, containerName,
