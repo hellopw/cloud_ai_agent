@@ -205,9 +205,9 @@ function setupAgent() {
 
   if (!model) {
     console.error(`Falling back to default model for ${provider}/${modelId}`);
-    // Use openai-responses for custom endpoints with API keys,
+    // Use anthropic-messages for custom endpoints with API keys,
     // openai-codex-responses for ChatGPT backend (JWT-based auth)
-    const api = baseUrl ? "openai-responses" : "openai-codex-responses";
+    const api = baseUrl ? "anthropic-messages" : "openai-codex-responses";
     model = {
       id: modelId,
       name: modelId,
