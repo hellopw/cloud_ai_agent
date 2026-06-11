@@ -117,6 +117,7 @@ agent_team_skills   (team_id -> agent_teams, skill_id, PK)
 | `/api/instances/:id` | GET/DELETE | 详情/停止删除 |
 | `/api/instances/:id/status` | GET | 代理到容器 /status |
 | `/api/instances/:id/chat` | WS | WebSocket 代理到容器 SSE |
+| `/api/instances/:id/chat-http` | POST | HTTP SSE 回退（公司代理阻止 WS 时） |
 | `/api/provider-configs` | GET/POST | 模型配置 CRUD |
 | `/api/provider-configs/:id` | GET/PUT/DELETE | 支持 openai-codex/anthropic/openai |
 | `/api/resources` | GET/POST | 资源 CRUD |
@@ -150,10 +151,10 @@ POST /api/agents/:id/build 触发，异步后台执行：
 POST /api/agents/:id/start，body 包含 `provider_config_id`：
 
 1. 创建 Instance 记录，状态 `starting`
-2. 根据 provider_config_id 查询 api_key 等配置
-3. 动态分配端口（3001 + instance_id 哈希值）
+2. 根据 provider_config_id 查询 api_key 等配置（优先于环境变量默认值）
+3. 动态分配端口（基于 instance UUID 的 FNV-32a hash 映射到 3001-12000，冲突时自动顺延）
 4. `docker run -d -p {port}:3000 -v {repo_abs}:/workspace -e AGENT_PROVIDER=... -e AGENT_MODEL=... -e AGENT_API_KEY=... -e AGENT_BASE_URL=... cloud-agent/{id}:latest`
-5. 状态 -> `running`
+5. 状态 -> `running`，同时写入 `error_msg`（失败时）
 
 ## 容器内 Wrapper
 
@@ -167,7 +168,12 @@ container-wrapper/src/server.js — Express 服务，3000 端口：
 
 内置 7 个 tools：bash, read_file, write_file, edit_file, search_content, list_files, git。
 
-Provider 通过环境变量指定：AGENT_PROVIDER, AGENT_MODEL, AGENT_API_KEY, AGENT_BASE_URL，支持 openai-codex, anthropic, openai。
+Provider 通过环境变量指定：AGENT_PROVIDER, AGENT_MODEL, AGENT_API_KEY, AGENT_BASE_URL。
+
+**模型查找与 fallback**：
+- 优先通过 `getModel(provider, modelId)` 在 pi-ai 库的模型注册表中查找
+- 若模型不在库中（如自定义模型 `deepseek-v4-pro` 通过内部代理访问），自动构造 fallback 模型对象
+- 自定义 baseUrl 时使用 `anthropic-messages` API 协议，否则使用 `openai-codex-responses`
 
 ## Team 容器内 Wrapper
 
@@ -201,11 +207,24 @@ POST /api/agent-teams/{id}/build：
 ```
 Browser (WS) -> Go Backend (gorilla/websocket)
   -> HTTP POST /chat -> Container (SSE)
-  <- WS: text_delta / tool_call / tool_result / agent_end / error
-  <- SSE events from container
+  <- WS: message_start / message_update / message_end / agent_start /
+         turn_start / turn_end / error / agent_end
+
+Browser (HTTP SSE fallback) -> POST /api/instances/:id/chat-http
+  -> Go Backend proxies -> Container SSE (transparent passthrough)
 ```
 
 Go 升级 WebSocket 连接，接收前端 `{type:"chat", message}`，转发到容器 `/chat`，逐行解析 SSE 事件并通过 WS 推回前端。
+
+**事件类型**：
+- `agent_start` / `turn_start` / `turn_end` / `agent_end`：会话生命周期
+- `message_start` / `message_update` / `message_end`：消息内容流式事件
+- `message_update.assistantMessageEvent` 内含 `thinking_delta`、`text_delta` 等实际内容
+- `error`：错误信息
+
+**WebSocket 断开时前端自动重连（3秒），如 WS 被公司代理阻止则自动降级为 HTTP SSE**。
+
+**容器内可启用 API 调用日志**：`server.js` monkey-patches `globalThis.fetch`，docker logs 中打印所有 HTTP 请求/响应详情（标注 `[API]` 前缀）。
 
 ## 前端页面总览
 
@@ -267,3 +286,8 @@ cd frontend && npm run dev            # :5173, proxy /api -> :8080
 - **失败实例展示**: Instances 页面同时展示 running 和 error/stopped 状态的实例，并显示 error_msg
 - **Agent 编辑限制**: 仅 draft 和 failed 状态的 Agent 可编辑，防止修改已构建成功的 Agent
 - **Agent 资源关联**: 创建 Agent 时可 select Git Resource 自动填充仓库信息，也可勾选 database/knowledge 类型资源
+- **端口冲突**: 旧代码 `3001 + len(instanceID)%1000` 固定返回 3037 -> 改为 FNV-32a hash + 冲突检测自动顺延
+- **Provider Config 不生效**: API handler 未读取请求 body 中的 provider_config_id -> 已修复
+- **模型 fallback 丢失 api 字段**: `getModel()` 返回 undefined 时 `{...undefined, baseUrl}` 生成残废对象 -> 已修复
+- **自定义模型 API 协议**: 内部代理只支持 Anthropic/Completions，不支持 Responses -> fallback 改用 anthropic-messages
+- **前端 message_update 事件未处理**: Anthropic 协议的流式内容封装在 message_update 中 -> 已添加解析和展示
