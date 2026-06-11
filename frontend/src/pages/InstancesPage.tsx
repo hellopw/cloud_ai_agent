@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { instancesApi, agentsApi, providerConfigsApi } from '../api/client'
+import { instancesApi, agentsApi, providerConfigsApi, agentTeamsApi } from '../api/client'
 
 const statusClass = (s: string) => {
   if (s === 'running') return 'tag-running'
@@ -19,6 +19,7 @@ const providerLabels: Record<string, string> = {
 export default function InstancesPage() {
   const [items, setItems] = useState<any[]>([])
   const [agents, setAgents] = useState<any[]>([])
+  const [teams, setTeams] = useState<any[]>([])
   const [models, setModels] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -27,12 +28,23 @@ export default function InstancesPage() {
 
   const load = async () => {
     try {
-      const [inst, ag, md] = await Promise.all([instancesApi.list(), agentsApi.list(), providerConfigsApi.list()])
-      setItems(inst); setAgents(ag); setModels(md); setError('')
+      const [inst, ag, md, tm] = await Promise.all([
+        instancesApi.list(), agentsApi.list(), providerConfigsApi.list(), agentTeamsApi.list()
+      ])
+      setItems(inst); setAgents(ag); setModels(md); setTeams(tm); setError('')
     } catch (e: any) { setError(e.message) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
+
+  const handleStartTeam = async (teamId: string) => {
+    setStarting(teamId)
+    try {
+      await fetch(`/api/agent-teams/${teamId}/start`, { method: 'POST' })
+      load()
+    } catch (e: any) { setError(e.message) }
+    finally { setStarting('') }
+  }
 
   const handleStart = async (agentId: string) => {
     const modelId = selectedModel[agentId] || ''
@@ -59,6 +71,9 @@ export default function InstancesPage() {
   const runningInstances = items.filter((i) => i.status === 'running' || i.status === 'starting')
   const failedInstances = items.filter((i) => i.status === 'error' || i.status === 'stopped')
   const readyAgents = agents.filter((a: any) => a.status === 'ready')
+  const readyTeams = teams.filter((t: any) => t.status === 'ready')
+
+  const getTeamName = (teamId: string) => teams.find((t: any) => t.id === teamId)?.name || teamId
 
   return (
     <div>
@@ -66,7 +81,7 @@ export default function InstancesPage() {
       {error && <p style={{ color: 'var(--danger)', marginBottom: 12 }}>{error}</p>}
 
       <div className="card" style={{ marginBottom: 24 }}>
-        <h3 style={{ marginBottom: 12 }}>Start New Instance</h3>
+        <h3 style={{ marginBottom: 12 }}>Start New Instance (Agent)</h3>
         {models.length === 0 ? (
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
             No model configs yet. Go to <b>Models</b> tab to create one first.
@@ -103,6 +118,30 @@ export default function InstancesPage() {
         )}
       </div>
 
+      {readyTeams.length > 0 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <h3 style={{ marginBottom: 12 }}>Start New Instance (Team)</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {readyTeams.map((t: any) => (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ minWidth: 200, fontWeight: 600 }}>{t.name}</span>
+                <span className="tag tag-ready" style={{ fontSize: 11 }}>Team</span>
+                <span style={{ flex: 1, fontSize: 13, color: 'var(--text-muted)' }}>
+                  {(t.members || []).length} members: {((t.members || []) as any[]).map((m: any) => m.name).join(', ')}
+                </span>
+                <button
+                  onClick={() => handleStartTeam(t.id)}
+                  disabled={starting === t.id}
+                  className="btn btn-primary"
+                >
+                  {starting === t.id ? 'Starting...' : 'Start'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {runningInstances.length === 0 && failedInstances.length === 0 ? (
         <div className="empty-state"><p>No instances yet.</p></div>
       ) : (
@@ -115,9 +154,11 @@ export default function InstancesPage() {
           <div>
             <h3>
               Instance {i.id.substring(0, 8)}...{' '}
+              {i.team_id && <span className="tag tag-ready" style={{ fontSize: 11 }}>Team: {getTeamName(i.team_id)}</span>}
               <span className={`tag ${statusClass(i.status)}`}>{i.status}</span>
             </h3>
-            <p>Agent: {i.agent_id} | Port: {i.host_port || 'N/A'}</p>
+            <p>{i.team_id ? 'Team Instance' : `Agent: ${i.agent_id}`} | Port: {i.host_port || 'N/A'}</p>
+            {i.team_id && <p style={{ fontSize: 11, marginTop: 4, color: 'var(--text-muted)' }}>Chat goes to the team leader agent</p>}
             <p style={{ fontSize: 11, marginTop: 4 }}>Started: {new Date(i.created_at).toLocaleString()}</p>
           </div>
           <div className="card-actions">

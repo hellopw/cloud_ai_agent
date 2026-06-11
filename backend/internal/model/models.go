@@ -57,9 +57,43 @@ type Agent struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type AgentTeam struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	TemplateID  string       `json:"template_id"`
+	RepoURL     string       `json:"repo_url"`
+	Branch      string       `json:"branch"`
+	GitUsername string       `json:"git_username,omitempty"`
+	GitPassword string       `json:"git_password,omitempty"`
+	ImageTag    string       `json:"image_tag"`
+	Status      string       `json:"status"`
+	ErrorMsg    string       `json:"error_msg,omitempty"`
+	PromptIDs   []string     `json:"prompt_ids,omitempty"`
+	SkillIDs    []string     `json:"skill_ids,omitempty"`
+	Members     []TeamMember `json:"members,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+}
+
+type TeamMember struct {
+	ID                   string    `json:"id"`
+	TeamID               string    `json:"team_id"`
+	Name                 string    `json:"name"`
+	Role                 string    `json:"role"`
+	AgentTemplateID      string    `json:"agent_template_id"`
+	ProviderConfigID     string    `json:"provider_config_id"`
+	PromptIDs            []string  `json:"prompt_ids,omitempty"`
+	SkillIDs             []string  `json:"skill_ids,omitempty"`
+	ToolIDs              []string  `json:"tool_ids,omitempty"`
+	SystemPromptOverride string    `json:"system_prompt_override,omitempty"`
+	Sequence             int       `json:"sequence"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
+}
 type Instance struct {
 	ID          string    `json:"id"`
 	AgentID     string    `json:"agent_id"`
+	TeamID      string    `json:"team_id,omitempty"`
 	ContainerID string    `json:"container_id"`
 	HostPort    int       `json:"host_port"`
 	Status      string    `json:"status"`

@@ -12,6 +12,8 @@ import InstancesPage from './pages/InstancesPage'
 import ChatPage from './pages/ChatPage'
 import ResourcesPage from './pages/ResourcesPage'
 import ModelsPage from './pages/ModelsPage'
+import AgentTeamsPage from './pages/AgentTeamsPage'
+import AgentTeamEditPage from './pages/AgentTeamEditPage'
 
 const navItems = [
   { to: '/prompts', label: 'Prompts' },
@@ -19,6 +21,7 @@ const navItems = [
   { to: '/tools', label: 'Tools' },
   { to: '/templates', label: 'Templates' },
   { to: '/agents', label: 'Agents' },
+  { to: '/agent-teams', label: 'Agent Teams' },
   { to: '/instances', label: 'Instances' },
   { to: '/models', label: 'Models' },
   { to: '/resources', label: 'Resources' },
@@ -53,6 +56,9 @@ function App() {
           <Route path="/templates/new" element={<TemplateEditPage />} />
           <Route path="/templates/:id" element={<TemplateEditPage />} />
           <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/agent-teams" element={<AgentTeamsPage />} />
+          <Route path="/agent-teams/new" element={<AgentTeamEditPage />} />
+          <Route path="/agent-teams/:id" element={<AgentTeamEditPage />} />
           <Route path="/instances" element={<InstancesPage />} />
           <Route path="/instances/:id/chat" element={<ChatPage />} />
           <Route path="/models" element={<ModelsPage />} />

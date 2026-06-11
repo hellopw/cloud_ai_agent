@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Store) ListInstances() ([]model.Instance, error) {
-	rows, err := s.db.Query("SELECT id, agent_id, container_id, host_port, status, created_at, updated_at FROM instances ORDER BY created_at DESC")
+	rows, err := s.db.Query("SELECT id, agent_id, COALESCE(team_id,''), container_id, host_port, status, created_at, updated_at FROM instances ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (s *Store) ListInstances() ([]model.Instance, error) {
 	instances := make([]model.Instance, 0)
 	for rows.Next() {
 		var i model.Instance
-		if err := rows.Scan(&i.ID, &i.AgentID, &i.ContainerID, &i.HostPort, &i.Status, &i.CreatedAt, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.AgentID, &i.TeamID, &i.ContainerID, &i.HostPort, &i.Status, &i.CreatedAt, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
 		instances = append(instances, i)
@@ -29,8 +29,8 @@ func (s *Store) ListInstances() ([]model.Instance, error) {
 
 func (s *Store) GetInstance(id string) (*model.Instance, error) {
 	var i model.Instance
-	err := s.db.QueryRow("SELECT id, agent_id, container_id, host_port, status, created_at, updated_at FROM instances WHERE id = ?", id).
-		Scan(&i.ID, &i.AgentID, &i.ContainerID, &i.HostPort, &i.Status, &i.CreatedAt, &i.UpdatedAt)
+	err := s.db.QueryRow("SELECT id, agent_id, COALESCE(team_id,''), container_id, host_port, status, created_at, updated_at FROM instances WHERE id = ?", id).
+		Scan(&i.ID, &i.AgentID, &i.TeamID, &i.ContainerID, &i.HostPort, &i.Status, &i.CreatedAt, &i.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -46,8 +46,8 @@ func (s *Store) CreateInstance(i *model.Instance) error {
 	i.CreatedAt = time.Now()
 	i.UpdatedAt = time.Now()
 	_, err := s.db.Exec(
-		"INSERT INTO instances (id, agent_id, container_id, host_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		i.ID, i.AgentID, i.ContainerID, i.HostPort, i.Status, i.CreatedAt, i.UpdatedAt,
+		"INSERT INTO instances (id, agent_id, team_id, container_id, host_port, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		i.ID, i.AgentID, i.TeamID, i.ContainerID, i.HostPort, i.Status, i.CreatedAt, i.UpdatedAt,
 	)
 	return err
 }

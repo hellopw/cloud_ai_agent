@@ -173,6 +173,38 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
+	mux.HandleFunc("/api/agent-teams", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET": h.listAgentTeams(w, r)
+		case "POST": h.createAgentTeam(w, r)
+		default: methodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/agent-teams/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/agent-teams/")
+		if strings.HasSuffix(path, "/log") {
+			id := strings.TrimSuffix(path, "/log")
+			if r.Method == "GET" { h.getTeamBuildLog(w, r, id) } else { methodNotAllowed(w) }
+			return
+		}
+		if strings.HasSuffix(path, "/build") {
+			id := strings.TrimSuffix(path, "/build")
+			if r.Method == "POST" { h.buildAgentTeam(w, r, id) } else { methodNotAllowed(w) }
+			return
+		}
+		if strings.HasSuffix(path, "/start") {
+			id := strings.TrimSuffix(path, "/start")
+			if r.Method == "POST" { h.startTeamInstance(w, r, id) } else { methodNotAllowed(w) }
+			return
+		}
+		switch r.Method {
+		case "GET": h.getAgentTeam(w, r, path)
+		case "PUT": h.updateAgentTeam(w, r, path)
+		case "DELETE": h.deleteAgentTeam(w, r, path)
+		default: methodNotAllowed(w)
+		}
+	})
+
 mux.HandleFunc("/api/health", h.health)
 
 	mux.HandleFunc("/api/resources", func(w http.ResponseWriter, r *http.Request) {

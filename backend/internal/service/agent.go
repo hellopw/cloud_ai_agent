@@ -12,6 +12,7 @@ import (
 	gitsvc "cloud_ai_agent/internal/git"
 	"cloud_ai_agent/internal/model"
 	"cloud_ai_agent/internal/store"
+	"encoding/json"
 )
 
 type AgentService struct {
@@ -190,6 +191,235 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*mo
 		}
 		repoAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", agentID, "repo"))
 		_, err := svc.docker.RunContainer(ctx, agent.ImageTag, containerName,
+			repoAbs, port, env)
+		if err != nil {
+			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0)
+			return
+		}
+		svc.store.UpdateInstanceStatus(instance.ID, "running", containerName, port)
+	}()
+
+	return instance, nil
+}
+
+func (svc *AgentService) BuildAgentTeam(ctx context.Context, teamID string) error {
+	team, err := svc.store.GetAgentTeam(teamID)
+	if err != nil || team == nil {
+		return fmt.Errorf("team not found")
+	}
+
+	svc.store.UpdateAgentTeamStatus(teamID, "building", "", "")
+
+	buildDir := filepath.Join(svc.projectRoot, "builds", teamID)
+	os.RemoveAll(buildDir)
+	if err := os.MkdirAll(buildDir, 0755); err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", err.Error())
+		return err
+	}
+
+	logPath := filepath.Join(buildDir, "build.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", err.Error())
+		return err
+	}
+	defer logFile.Close()
+	logWriter := io.MultiWriter(logFile, os.Stdout)
+
+	// Clone code repository
+	repoDir := filepath.Join(buildDir, "repo")
+	if err := svc.git.Clone(ctx, team.RepoURL, team.Branch, repoDir, team.GitUsername, team.GitPassword, logWriter); err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", "git clone: "+err.Error())
+		return err
+	}
+
+	// Generate team Dockerfile
+	agentDirs := make([]string, 0, len(team.Members))
+	for _, m := range team.Members {
+		agentDirs = append(agentDirs, filepath.Join("agents", m.Name))
+	}
+
+	var teamPromptsDir, teamSkillsDir string
+	if len(team.PromptIDs) > 0 {
+		teamPromptsDir = "team-prompts"
+	}
+	if len(team.SkillIDs) > 0 {
+		teamSkillsDir = "team-skills"
+	}
+
+	dockerfile, err := codegen.GenerateTeamDockerfile(&codegen.TeamDockerfileData{
+		AgentDirs:      agentDirs,
+		TeamPromptsDir: teamPromptsDir,
+		TeamSkillsDir:  teamSkillsDir,
+	})
+	if err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", err.Error())
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", err.Error())
+		return err
+	}
+
+	// Copy team-server.js to build context
+	wrapperSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "team-server.js")
+	if _, statErr := os.Stat(wrapperSrc); os.IsNotExist(statErr) {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", "team-server.js not found")
+		return fmt.Errorf("team-server.js not found")
+	}
+	wrapperData, err := os.ReadFile(wrapperSrc)
+	if err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", "read team-server.js: "+err.Error())
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "team-server.js"), wrapperData, 0644); err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", err.Error())
+		return err
+	}
+
+	// Copy MCP client
+	mcpClientSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "mcp-client.js")
+	if mcpData, err := os.ReadFile(mcpClientSrc); err == nil {
+		os.WriteFile(filepath.Join(buildDir, "mcp-client.js"), mcpData, 0644)
+	}
+
+	// Build manifest with member configs
+	type manifestMember struct {
+		Name                 string `json:"name"`
+		Role                 string `json:"role"`
+		Provider             string `json:"provider"`
+		ModelID              string `json:"model_id"`
+		APIKey               string `json:"api_key"`
+		BaseURL              string `json:"base_url"`
+		SystemPromptOverride string `json:"system_prompt_override,omitempty"`
+	}
+	type manifest struct {
+		TeamName       string           `json:"team_name"`
+		Members        []manifestMember `json:"members"`
+		TeamPromptsDir string           `json:"team_prompts_dir,omitempty"`
+		TeamSkillsDir  string           `json:"team_skills_dir,omitempty"`
+	}
+
+	mf := manifest{TeamName: team.Name, TeamPromptsDir: teamPromptsDir, TeamSkillsDir: teamSkillsDir}
+
+	for _, m := range team.Members {
+		memberDir := filepath.Join(buildDir, "agents", m.Name)
+		os.MkdirAll(memberDir, 0755)
+
+		tmpl, err := svc.store.GetTemplate(m.AgentTemplateID)
+		if err != nil || tmpl == nil {
+			svc.store.UpdateAgentTeamStatus(teamID, "failed", "", "member "+m.Name+" template not found")
+			return fmt.Errorf("member %s template not found", m.Name)
+		}
+
+		memberPromptIDs := make([]string, 0)
+		memberSkillIDs := make([]string, 0)
+		seenPrompts := make(map[string]bool)
+		seenSkills := make(map[string]bool)
+
+		for _, pid := range team.PromptIDs {
+			if !seenPrompts[pid] { memberPromptIDs = append(memberPromptIDs, pid); seenPrompts[pid] = true }
+		}
+		for _, pid := range m.PromptIDs {
+			if !seenPrompts[pid] { memberPromptIDs = append(memberPromptIDs, pid); seenPrompts[pid] = true }
+		}
+		for _, sid := range team.SkillIDs {
+			if !seenSkills[sid] { memberSkillIDs = append(memberSkillIDs, sid); seenSkills[sid] = true }
+		}
+		for _, sid := range m.SkillIDs {
+			if !seenSkills[sid] { memberSkillIDs = append(memberSkillIDs, sid); seenSkills[sid] = true }
+		}
+
+		extDir := filepath.Join(memberDir, "extensions")
+		os.MkdirAll(extDir, 0755)
+		for _, tid := range tmpl.ToolIDs {
+			tool, err := svc.store.GetTool(tid)
+			if err != nil { continue }
+			tsCode, err := codegen.GenerateToolExtension(tool.DSLDefinition)
+			if err != nil { continue }
+			os.WriteFile(filepath.Join(extDir, tool.Name+".ts"), []byte(tsCode), 0644)
+		}
+		for _, tid := range m.ToolIDs {
+			tool, err := svc.store.GetTool(tid)
+			if err != nil { continue }
+			tsCode, err := codegen.GenerateToolExtension(tool.DSLDefinition)
+			if err != nil { continue }
+			os.WriteFile(filepath.Join(extDir, tool.Name+".ts"), []byte(tsCode), 0644)
+		}
+
+		svc.writePromptsSkills(memberDir, memberPromptIDs, memberSkillIDs)
+
+		provider := ""
+		modelID := ""
+		apiKey := ""
+		baseURL := ""
+		if m.ProviderConfigID != "" {
+			pc, err := svc.store.GetProviderConfig(m.ProviderConfigID)
+			if err == nil && pc != nil {
+				provider = pc.Provider
+				modelID = pc.ModelID
+				apiKey = pc.APIKey
+				baseURL = pc.BaseURL
+			}
+		}
+
+		mf.Members = append(mf.Members, manifestMember{
+			Name:                 m.Name,
+			Role:                 m.Role,
+			Provider:             provider,
+			ModelID:              modelID,
+			APIKey:               apiKey,
+			BaseURL:              baseURL,
+			SystemPromptOverride: m.SystemPromptOverride,
+		})
+	}
+
+	// Write team-level prompts/skills
+	if teamPromptsDir != "" {
+		teampDir := filepath.Join(buildDir, teamPromptsDir)
+		os.MkdirAll(teampDir, 0755)
+		svc.writePromptsSkills(teampDir, team.PromptIDs, nil)
+	}
+	if teamSkillsDir != "" {
+		teamsDir := filepath.Join(buildDir, teamSkillsDir)
+		os.MkdirAll(teamsDir, 0755)
+		svc.writePromptsSkills(teamsDir, nil, team.SkillIDs)
+	}
+
+	manifestData, _ := json.MarshalIndent(mf, "", "  ")
+	os.WriteFile(filepath.Join(buildDir, "team-manifest.json"), manifestData, 0644)
+
+	imageTag := fmt.Sprintf("cloud-agent-team/%s:latest", teamID)
+	if err := svc.docker.BuildImage(ctx, buildDir, imageTag, logWriter); err != nil {
+		svc.store.UpdateAgentTeamStatus(teamID, "failed", "", "docker build: "+err.Error())
+		return err
+	}
+
+	svc.store.UpdateAgentTeamStatus(teamID, "ready", imageTag, "")
+	return nil
+}
+
+func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (*model.Instance, error) {
+	team, err := svc.store.GetAgentTeam(teamID)
+	if err != nil || team == nil { return nil, fmt.Errorf("team not found") }
+	if team.Status != "ready" { return nil, fmt.Errorf("team not ready: %s", team.Status) }
+
+	instance := &model.Instance{AgentID: "", TeamID: teamID}
+	if err := svc.store.CreateInstance(instance); err != nil { return nil, err }
+
+	port := 3001 + len(instance.ID)%1000
+	containerName := fmt.Sprintf("cloud-agent-team-%s", instance.ID[:12])
+
+	go func() {
+		ctx := context.Background()
+		env := map[string]string{
+			"AGENT_PROVIDER": os.Getenv("AGENT_PROVIDER"),
+			"AGENT_MODEL":    os.Getenv("AGENT_MODEL"),
+			"AGENT_API_KEY":  os.Getenv("AGENT_API_KEY"),
+			"AGENT_BASE_URL": os.Getenv("AGENT_BASE_URL"),
+		}
+		repoAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", teamID, "repo"))
+		_, err := svc.docker.RunContainer(ctx, team.ImageTag, containerName,
 			repoAbs, port, env)
 		if err != nil {
 			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0)

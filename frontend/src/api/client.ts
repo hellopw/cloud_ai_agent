@@ -82,3 +82,12 @@ export const resourcesApi = {
   update: (id: string, data: any) => request(`/resources/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => request(`/resources/${id}`, { method: 'DELETE' }),
 }
+
+// Agent Teams
+export const agentTeamsApi = {
+  list: () => request('/agent-teams'),
+  get: (id: string) => request(`/agent-teams/${id}`),
+  create: (data: any) => request('/agent-teams', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/agent-teams/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/agent-teams/${id}`, { method: 'DELETE' }),
+}

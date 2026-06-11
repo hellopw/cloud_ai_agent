@@ -492,6 +492,116 @@ func (h *Handler) deleteResource(w http.ResponseWriter, r *http.Request, id stri
 }
 
 
+// --- Agent Teams ---
+
+func (h *Handler) listAgentTeams(w http.ResponseWriter, r *http.Request) {
+	teams, err := h.store.ListAgentTeams()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, teams)
+}
+
+func (h *Handler) getAgentTeam(w http.ResponseWriter, r *http.Request, id string) {
+	t, err := h.store.GetAgentTeam(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if t == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (h *Handler) createAgentTeam(w http.ResponseWriter, r *http.Request) {
+	var t model.AgentTeam
+	if err := decodeJSON(r, &t); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateAgentTeam(&t); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, t)
+}
+
+func (h *Handler) updateAgentTeam(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetAgentTeam(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if existing.Status != "draft" && existing.Status != "failed" {
+		writeError(w, http.StatusConflict, "can only edit draft or failed teams")
+		return
+	}
+	var t model.AgentTeam
+	if err := decodeJSON(r, &t); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	t.ID = existing.ID
+	t.Status = existing.Status
+	t.ImageTag = existing.ImageTag
+	t.ErrorMsg = existing.ErrorMsg
+	t.CreatedAt = existing.CreatedAt
+	if t.GitUsername == "" { t.GitUsername = existing.GitUsername }
+	if t.GitPassword == "" { t.GitPassword = existing.GitPassword }
+	if err := h.store.UpdateAgentTeam(&t); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (h *Handler) deleteAgentTeam(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteAgentTeam(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+func (h *Handler) getTeamBuildLog(w http.ResponseWriter, r *http.Request, id string) {
+	logPath := filepath.Join("..", "builds", id, "build.log")
+	if os.Getenv("PROJECT_ROOT") != "" {
+		logPath = filepath.Join(os.Getenv("PROJECT_ROOT"), "builds", id, "build.log")
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "build log not found")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(data)
+}
+
+func (h *Handler) buildAgentTeam(w http.ResponseWriter, r *http.Request, id string) {
+	if h.agentSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent service not initialized")
+		return
+	}
+	go h.agentSvc.BuildAgentTeam(context.Background(), id)
+	writeJSON(w, http.StatusAccepted, map[string]string{"message": "build started"})
+}
+
+func (h *Handler) startTeamInstance(w http.ResponseWriter, r *http.Request, id string) {
+	if h.agentSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "agent service not initialized")
+		return
+	}
+	instance, err := h.agentSvc.StartTeamInstance(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, instance)
+}
+
 // --- Health ---
 
 
