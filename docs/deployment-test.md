@@ -100,3 +100,11 @@ Go 二进制中已硬编码以下配置：
 - npm 代理：`10.18.34.194:3128`（构建 Docker 镜像时在 Dockerfile 中配置）
 - Docker 基础镜像：`private-registry.sohucs.com/domeos-pub/node:22.14.0-alpine3.21`
 
+## 容器端口分配
+
+Instance 启动时自动分配宿主机端口（映射容器 3000 端口）：
+
+- **范围**：3001–12000
+- **算法**：对 instance UUID 取 FNV-32a hash，映射到 3001 + hash%9000
+- **冲突处理**：检测到端口被已有 running/starting 实例占用时自动顺延到下一个可用端口
+

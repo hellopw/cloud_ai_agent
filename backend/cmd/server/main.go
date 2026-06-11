@@ -33,6 +33,8 @@ func main() {
 	if err := s.Migrate(); err != nil { log.Fatalf("Failed to run migrations: %v", err) }
 	log.Println("Database migrated successfully")
 
+	if err := s.SeedDefaultTools(); err != nil { log.Printf("Warning: seed default tools: %v", err) }
+
 	h := api.NewHandler(s)
 	agentSvc := service.NewAgentService(s)
 	h.WithAgentService(agentSvc)

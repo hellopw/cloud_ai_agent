@@ -13,6 +13,8 @@ import (
 	"cloud_ai_agent/internal/model"
 	"cloud_ai_agent/internal/store"
 	"encoding/json"
+	"hash/fnv"
+	"slices"
 )
 
 type AgentService struct {
@@ -77,7 +79,7 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 	}
 
 	// Generate Dockerfile
-	dockerfile, err := codegen.GenerateDockerfile(&codegen.DockerfileData{
+	dockerfile, err := codegen.GenerateDockerfileByAgentType(tmpl.AgentType, &codegen.DockerfileData{
 		CustomContent: tmpl.DockerfileContent,
 	})
 	if err != nil {
@@ -89,8 +91,15 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 		return err
 	}
 
-	// Copy wrapper server.js to build context root (Dockerfile expects it there)
-	wrapperSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "server.js")
+	// Copy wrapper based on agent type
+	wrapperName := "server.js"
+	switch tmpl.AgentType {
+	case codegen.AgentTypeClaudeCode:
+		wrapperName = "server-claude-code.js"
+	case codegen.AgentTypeCodex:
+		wrapperName = "server-codex.js"
+	}
+	wrapperSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", wrapperName)
 	wrapperData, err := os.ReadFile(wrapperSrc)
 	if err != nil {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", "read wrapper: "+err.Error())
@@ -178,7 +187,7 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*mo
 	instance := &model.Instance{AgentID: agentID}
 	if err := svc.store.CreateInstance(instance); err != nil { return nil, err }
 
-	port := 3001 + len(instance.ID)%1000
+	port := svc.findFreePort(instance.ID)
 	containerName := fmt.Sprintf("cloud-agent-%s", instance.ID[:12])
 
 	go func() {
@@ -193,10 +202,10 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*mo
 		_, err := svc.docker.RunContainer(ctx, agent.ImageTag, containerName,
 			repoAbs, port, env)
 		if err != nil {
-			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0)
+			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0, err.Error())
 			return
 		}
-		svc.store.UpdateInstanceStatus(instance.ID, "running", containerName, port)
+		svc.store.UpdateInstanceStatus(instance.ID, "running", containerName, port, "")
 	}()
 
 	return instance, nil
@@ -399,6 +408,37 @@ func (svc *AgentService) BuildAgentTeam(ctx context.Context, teamID string) erro
 	return nil
 }
 
+// findFreePort computes a port from instance ID hash and resolves conflicts.
+// Port range: 3001-12000.
+func (svc *AgentService) findFreePort(instanceID string) int {
+	h := fnv.New32a()
+	h.Write([]byte(instanceID))
+	base := 3001 + int(h.Sum32()%9000)
+
+	instances, err := svc.store.ListInstances()
+	if err != nil {
+		return base
+	}
+	used := make([]int, 0)
+	for _, inst := range instances {
+		if inst.HostPort > 0 && (inst.Status == "running" || inst.Status == "starting") {
+			used = append(used, inst.HostPort)
+		}
+	}
+	for port := base; port <= 12000; port++ {
+		if !slices.Contains(used, port) {
+			return port
+		}
+	}
+	// fallback: scan from 3001 upward
+	for port := 3001; port <= 12000; port++ {
+		if !slices.Contains(used, port) {
+			return port
+		}
+	}
+	return 3001
+}
+
 func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (*model.Instance, error) {
 	team, err := svc.store.GetAgentTeam(teamID)
 	if err != nil || team == nil { return nil, fmt.Errorf("team not found") }
@@ -407,7 +447,7 @@ func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (
 	instance := &model.Instance{AgentID: "", TeamID: teamID}
 	if err := svc.store.CreateInstance(instance); err != nil { return nil, err }
 
-	port := 3001 + len(instance.ID)%1000
+	port := svc.findFreePort(instance.ID)
 	containerName := fmt.Sprintf("cloud-agent-team-%s", instance.ID[:12])
 
 	go func() {
@@ -422,10 +462,10 @@ func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (
 		_, err := svc.docker.RunContainer(ctx, team.ImageTag, containerName,
 			repoAbs, port, env)
 		if err != nil {
-			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0)
+			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0, err.Error())
 			return
 		}
-		svc.store.UpdateInstanceStatus(instance.ID, "running", containerName, port)
+		svc.store.UpdateInstanceStatus(instance.ID, "running", containerName, port, "")
 	}()
 
 	return instance, nil

@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Store) ListInstances() ([]model.Instance, error) {
-	rows, err := s.db.Query("SELECT id, agent_id, COALESCE(team_id,''), container_id, host_port, status, created_at, updated_at FROM instances ORDER BY created_at DESC")
+	rows, err := s.db.Query("SELECT id, agent_id, COALESCE(team_id,''), container_id, host_port, status, COALESCE(error_msg,''), created_at, updated_at FROM instances ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (s *Store) ListInstances() ([]model.Instance, error) {
 	instances := make([]model.Instance, 0)
 	for rows.Next() {
 		var i model.Instance
-		if err := rows.Scan(&i.ID, &i.AgentID, &i.TeamID, &i.ContainerID, &i.HostPort, &i.Status, &i.CreatedAt, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.AgentID, &i.TeamID, &i.ContainerID, &i.HostPort, &i.Status, &i.ErrorMsg, &i.CreatedAt, &i.UpdatedAt); err != nil {
 			return nil, err
 		}
 		instances = append(instances, i)
@@ -29,8 +29,8 @@ func (s *Store) ListInstances() ([]model.Instance, error) {
 
 func (s *Store) GetInstance(id string) (*model.Instance, error) {
 	var i model.Instance
-	err := s.db.QueryRow("SELECT id, agent_id, COALESCE(team_id,''), container_id, host_port, status, created_at, updated_at FROM instances WHERE id = ?", id).
-		Scan(&i.ID, &i.AgentID, &i.TeamID, &i.ContainerID, &i.HostPort, &i.Status, &i.CreatedAt, &i.UpdatedAt)
+	err := s.db.QueryRow("SELECT id, agent_id, COALESCE(team_id,''), container_id, host_port, status, COALESCE(error_msg,''), created_at, updated_at FROM instances WHERE id = ?", id).
+		Scan(&i.ID, &i.AgentID, &i.TeamID, &i.ContainerID, &i.HostPort, &i.Status, &i.ErrorMsg, &i.CreatedAt, &i.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -52,10 +52,10 @@ func (s *Store) CreateInstance(i *model.Instance) error {
 	return err
 }
 
-func (s *Store) UpdateInstanceStatus(id, status, containerID string, hostPort int) error {
+func (s *Store) UpdateInstanceStatus(id, status, containerID string, hostPort int, errorMsg string) error {
 	_, err := s.db.Exec(
-		"UPDATE instances SET status=?, container_id=COALESCE(NULLIF(?, ''), container_id), host_port=CASE WHEN ? > 0 THEN ? ELSE host_port END, updated_at=? WHERE id=?",
-		status, containerID, hostPort, hostPort, time.Now(), id,
+		"UPDATE instances SET status=?, container_id=COALESCE(NULLIF(?, ''), container_id), host_port=CASE WHEN ? > 0 THEN ? ELSE host_port END, error_msg=CASE WHEN ? != '' THEN ? ELSE error_msg END, updated_at=? WHERE id=?",
+		status, containerID, hostPort, hostPort, errorMsg, errorMsg, time.Now(), id,
 	)
 	return err
 }

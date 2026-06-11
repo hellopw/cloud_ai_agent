@@ -39,13 +39,31 @@ export default function ChatPage() {
   }, [id])
 
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/api/instances/${id}/chat`)
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let ws: WebSocket | null = null
 
-    ws.onopen = () => setConnected(true)
-    ws.onclose = () => setConnected(false)
+    const connect = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const url = `${protocol}//${window.location.host}/api/instances/${id}/chat`
+      console.log('[ChatPage] WebSocket connecting to', url)
+      ws = new WebSocket(url)
+      wsRef.current = ws
 
-    ws.onmessage = (event) => {
+      ws.onopen = () => {
+        console.log('[ChatPage] WebSocket connected')
+        setConnected(true)
+      }
+      ws.onclose = (e) => {
+        console.log('[ChatPage] WebSocket closed, code=' + e.code + ' reason=' + e.reason)
+        setConnected(false)
+        // Auto-reconnect after 3 seconds
+        reconnectTimer = setTimeout(connect, 3000)
+      }
+      ws.onerror = (e) => {
+        console.error('[ChatPage] WebSocket error', e)
+      }
+
+      ws.onmessage = (event) => {
       const msg = JSON.parse(event.data)
 
       switch (msg.type) {
@@ -80,19 +98,159 @@ export default function ChatPage() {
       }
     }
 
-    wsRef.current = ws
-    return () => ws.close()
+    }
+    connect()
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (ws) ws.close()
+      wsRef.current = null
+    }
   }, [id])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingContent])
 
+  // SSE fallback for when WebSocket is blocked by corporate proxy
+  const sendViaHttp = async (trimmed: string) => {
+    console.log('[ChatPage] HTTP fallback: sending message')
+    try {
+      const resp = await fetch('/api/instances/' + id + '/chat-http', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: trimmed }),
+      })
+      if (!resp.ok) {
+        const text = await resp.text()
+        throw new Error('HTTP ' + resp.status + ': ' + text)
+      }
+      const reader = resp.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        // Process complete SSE lines
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const rawLine of lines) {
+          const line = rawLine.trim()
+          if (!line) continue
+          try {
+            // SSE format: "event: TYPE" or "data: {...}"  
+            if (line.startsWith('event: ')) {
+              // Currently events come as "event: TYPE\ndata: {...}" pairs,
+              // but they arrive on separate lines from the reader.
+              // We handle them in the next iteration when data line arrives.
+              continue
+            }
+            if (line.startsWith('data: ')) {
+              const dataStr = line.substring(6)
+              // Check previous line for event type
+              const prevLine = lines[lines.length - 1]?.trim() || ''
+              let eventType = ''
+              if (prevLine.startsWith('event: ')) {
+                eventType = prevLine.substring(7)
+              }
+              const parsed = JSON.parse(dataStr)
+              processEvent({ type: eventType || 'text_delta', data: parsed })
+            }
+          } catch {
+            // Skip malformed lines
+          }
+        }
+      }
+      // Process remaining buffer
+      if (buffer.trim()) {
+        try {
+          if (buffer.startsWith('data: ')) {
+            const parsed = JSON.parse(buffer.substring(6))
+            processEvent({ type: 'agent_end', data: parsed })
+          }
+        } catch { /* ignore */ }
+      }
+      // Signal end of streaming
+      if (streamingRef.current) {
+        setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+      }
+      streamingRef.current = ''
+      setStreamingContent('')
+    } catch (e: unknown) {
+      console.error('[ChatPage] HTTP fallback error', e)
+      setMessages((prev) => [...prev, {
+        role: 'system',
+        content: 'Error: ' + (e instanceof Error ? e.message : String(e)),
+      }])
+    }
+  }
+
+  // Shared event processing for both WebSocket and HTTP fallback
+  const processEvent = (eventData: { type: string; data: any }) => {
+    switch (eventData.type) {
+      case 'text_delta':
+        streamingRef.current += (eventData.data.delta || '')
+        setStreamingContent(streamingRef.current)
+        break
+      case 'tool_call':
+        setMessages((prev) => [...prev, {
+          role: 'tool',
+          content: 'Calling: ' + eventData.data.toolName,
+          toolCall: {
+            toolCallId: eventData.data.toolCallId,
+            toolName: eventData.data.toolName,
+            input: eventData.data.input,
+          },
+        }])
+        break
+      case 'tool_result':
+        setMessages((prev) => [...prev, {
+          role: 'system',
+          content: 'Result from tool: ' + JSON.stringify(eventData.data.content).substring(0, 200),
+        }])
+        break
+      case 'agent_end':
+        if (streamingRef.current) {
+          setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+        }
+        streamingRef.current = ''
+        setStreamingContent('')
+        break
+      case 'error':
+        setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + eventData.data.message }])
+        break
+    }
+  }
+
   const handleSend = () => {
-    if (!input.trim() || !wsRef.current) return
-    setMessages((prev) => [...prev, { role: 'user', content: input }])
-    wsRef.current.send(JSON.stringify({ type: 'chat', message: input }))
-    setInput('')
+    const trimmed = input.trim()
+    console.log('[ChatPage] handleSend called', { input, trimmed, connected, wsReadyState: wsRef.current?.readyState })
+    if (!trimmed) {
+      console.log('[ChatPage] handleSend: empty input, returning')
+      return
+    }
+    const wsState = wsRef.current?.readyState
+    if (wsState !== WebSocket.OPEN) {
+      // WebSocket not available, fall back to HTTP SSE
+      console.log('[ChatPage] handleSend: WebSocket not OPEN (state=' + wsState + '), using HTTP fallback')
+      setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+      setInput('')
+      sendViaHttp(trimmed)
+      return
+    }
+    console.log('[ChatPage] handleSend: sending via WebSocket')
+    setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+    try {
+      wsRef.current!.send(JSON.stringify({ type: 'chat', message: trimmed }))
+      setInput('')
+    } catch (e) {
+      console.error('[ChatPage] handleSend: send failed, falling back to HTTP', e)
+      setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+      setInput('')
+      sendViaHttp(trimmed)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -103,7 +261,7 @@ export default function ChatPage() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
       <div style={{
         padding: '12px 20px',
         borderBottom: '1px solid var(--border)',
@@ -114,8 +272,8 @@ export default function ChatPage() {
       }}>
         <Link to="/instances" className="btn btn-ghost" style={{ fontSize: 12 }}>Back</Link>
         <h3 style={{ fontSize: 15, margin: 0 }}>Instance {id?.substring(0, 8)}...</h3>
-        <span className={`tag ${connected ? 'tag-ready' : 'tag-failed'}`}>
-          {connected ? 'connected' : 'disconnected'}
+        <span className={`tag ${connected ? 'tag-ready' : 'tag-failed'}`} title={`WebSocket readyState: ${wsRef.current?.readyState}`}>
+          {connected ? 'connected' : 'disconnected [' + (wsRef.current?.readyState ?? 'null') + ']'}
         </span>
         {containerInfo.provider && (
           <>
@@ -197,7 +355,8 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+            placeholder={connected ? "Type a message... (Enter to send, Shift+Enter for new line)" : "Disconnected \u2014 start the instance to chat"}
+            disabled={!connected}
             rows={2}
             style={{
               flex: 1,
@@ -211,7 +370,7 @@ export default function ChatPage() {
               resize: 'none',
             }}
           />
-          <button onClick={handleSend} className="btn btn-primary" style={{ alignSelf: 'flex-end' }}>
+          <button onClick={handleSend} disabled={!connected} className="btn btn-primary" style={{ alignSelf: 'flex-end', opacity: connected ? 1 : 0.5 }}>
             Send
           </button>
         </div>

@@ -34,6 +34,7 @@ type Template struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
 	Description       string    `json:"description"`
+	AgentType         string    `json:"agent_type"`
 	DockerfileContent string    `json:"dockerfile_content"`
 	PromptIDs         []string  `json:"prompt_ids,omitempty"`
 	SkillIDs          []string  `json:"skill_ids,omitempty"`
@@ -97,6 +98,7 @@ type Instance struct {
 	ContainerID string    `json:"container_id"`
 	HostPort    int       `json:"host_port"`
 	Status      string    `json:"status"`
+	ErrorMsg    string    `json:"error_msg,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

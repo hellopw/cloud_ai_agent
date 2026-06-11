@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Store) ListTemplates() ([]model.Template, error) {
-	rows, err := s.db.Query("SELECT id, name, description, dockerfile_content, created_at, updated_at FROM templates ORDER BY created_at DESC")
+	rows, err := s.db.Query("SELECT id, name, description, agent_type, dockerfile_content, created_at, updated_at FROM templates ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (s *Store) ListTemplates() ([]model.Template, error) {
 	templates := make([]model.Template, 0)
 	for rows.Next() {
 		var t model.Template
-		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.DockerfileContent, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.Name, &t.Description, &t.AgentType, &t.DockerfileContent, &t.CreatedAt, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		templates = append(templates, t)
@@ -29,8 +29,8 @@ func (s *Store) ListTemplates() ([]model.Template, error) {
 
 func (s *Store) GetTemplate(id string) (*model.Template, error) {
 	var t model.Template
-	err := s.db.QueryRow("SELECT id, name, description, dockerfile_content, created_at, updated_at FROM templates WHERE id = ?", id).
-		Scan(&t.ID, &t.Name, &t.Description, &t.DockerfileContent, &t.CreatedAt, &t.UpdatedAt)
+	err := s.db.QueryRow("SELECT id, name, description, agent_type, dockerfile_content, created_at, updated_at FROM templates WHERE id = ?", id).
+		Scan(&t.ID, &t.Name, &t.Description, &t.AgentType, &t.DockerfileContent, &t.CreatedAt, &t.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -90,8 +90,8 @@ func (s *Store) CreateTemplate(t *model.Template) error {
 	t.CreatedAt = time.Now()
 	t.UpdatedAt = time.Now()
 	_, err := s.db.Exec(
-		"INSERT INTO templates (id, name, description, dockerfile_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		t.ID, t.Name, t.Description, t.DockerfileContent, t.CreatedAt, t.UpdatedAt,
+		"INSERT INTO templates (id, name, description, agent_type, dockerfile_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+		t.ID, t.Name, t.Description, t.AgentType, t.DockerfileContent, t.CreatedAt, t.UpdatedAt,
 	)
 	return err
 }
@@ -99,8 +99,8 @@ func (s *Store) CreateTemplate(t *model.Template) error {
 func (s *Store) UpdateTemplate(t *model.Template) error {
 	t.UpdatedAt = time.Now()
 	_, err := s.db.Exec(
-		"UPDATE templates SET name=?, description=?, dockerfile_content=?, updated_at=? WHERE id=?",
-		t.Name, t.Description, t.DockerfileContent, t.UpdatedAt, t.ID,
+		"UPDATE templates SET name=?, description=?, agent_type=?, dockerfile_content=?, updated_at=? WHERE id=?",
+		t.Name, t.Description, t.AgentType, t.DockerfileContent, t.UpdatedAt, t.ID,
 	)
 	return err
 }

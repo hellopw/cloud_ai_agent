@@ -144,6 +144,11 @@ func NewRouter(h *Handler) http.Handler {
 			proxy.HandleProxy("localhost", h.getInstancePort(id), "/status")(w, r)
 			return
 		}
+		if strings.HasSuffix(path, "/chat-http") {
+			id := strings.TrimSuffix(path, "/chat-http")
+			proxy.HandleChatHTTP("localhost", h.getInstancePort(id))(w, r)
+			return
+		}
 		if strings.HasSuffix(path, "/chat") {
 			id := strings.TrimSuffix(path, "/chat")
 			proxy.HandleChat("localhost", h.getInstancePort(id))(w, r)

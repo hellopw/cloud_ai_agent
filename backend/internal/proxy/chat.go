@@ -67,6 +67,7 @@ func HandleChat(containerHost string, containerPort int) http.HandlerFunc {
 			}
 
 			if msg.Type == "chat" {
+				log.Printf("ws: received chat message, proxying to %s/chat", containerURL)
 				go proxyChatToContainer(conn, containerURL, msg.Message)
 			}
 		}
@@ -76,8 +77,10 @@ func HandleChat(containerHost string, containerPort int) http.HandlerFunc {
 func proxyChatToContainer(conn *websocket.Conn, containerURL, message string) {
 	reqBody, _ := json.Marshal(map[string]string{"message": message})
 
+	log.Printf("ws: posting to %s/chat", containerURL)
 	resp, err := proxyClient.Post(containerURL+"/chat", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
+		log.Printf("ws: post error: %v", err)
 		sendWSEvent(conn, "error", map[string]string{"message": fmt.Sprintf("container unreachable: %v", err)})
 		return
 	}
@@ -99,9 +102,14 @@ func proxyChatToContainer(conn *websocket.Conn, containerURL, message string) {
 
 		if strings.HasPrefix(line, "event: ") {
 			eventType := strings.TrimPrefix(line, "event: ")
-			dataLine, err := reader.ReadString('\n')
-			if err != nil { break }
-			dataLine = strings.TrimSpace(dataLine)
+			// Skip empty lines between event and data
+			var dataLine string
+			for {
+				dataLine, err = reader.ReadString('\n')
+				if err != nil { break }
+				dataLine = strings.TrimSpace(dataLine)
+				if dataLine != "" { break }
+			}
 			if strings.HasPrefix(dataLine, "data: ") {
 				dataJSON := strings.TrimPrefix(dataLine, "data: ")
 				mu.Lock()
