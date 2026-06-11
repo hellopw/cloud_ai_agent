@@ -223,6 +223,7 @@ function setupAgent() {
   }
 
   console.log(`Agent configured with provider=${provider} model=${modelId}`);
+  console.log(`Model: ${JSON.stringify(model)}`);
 
   const agent = new Agent({
     streamFn: streamSimple,
