@@ -64,3 +64,21 @@ export const instancesApi = {
   get: (id: string) => request(`/instances/${id}`),
   delete: (id: string) => request(`/instances/${id}`, { method: 'DELETE' }),
 }
+
+// Provider Configs
+export const providerConfigsApi = {
+  list: () => request('/provider-configs'),
+  get: (id: string) => request(`/provider-configs/${id}`),
+  create: (data: any) => request('/provider-configs', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/provider-configs/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/provider-configs/${id}`, { method: 'DELETE' }),
+}
+
+// Resources
+export const resourcesApi = {
+  list: () => request('/resources'),
+  get: (id: string) => request(`/resources/${id}`),
+  create: (data: any) => request('/resources', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/resources/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/resources/${id}`, { method: 'DELETE' }),
+}

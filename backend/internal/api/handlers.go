@@ -427,6 +427,71 @@ func (h *Handler) deleteInstance(w http.ResponseWriter, r *http.Request, id stri
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
+// --- Resources ---
+
+func (h *Handler) listResources(w http.ResponseWriter, r *http.Request) {
+	resources, err := h.store.ListResources()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, resources)
+}
+
+func (h *Handler) getResource(w http.ResponseWriter, r *http.Request, id string) {
+	res, err := h.store.GetResource(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if res == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) createResource(w http.ResponseWriter, r *http.Request) {
+	var res model.Resource
+	if err := decodeJSON(r, &res); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateResource(&res); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, res)
+}
+
+func (h *Handler) updateResource(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetResource(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var res model.Resource
+	if err := decodeJSON(r, &res); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	res.ID = existing.ID
+	if err := h.store.UpdateResource(&res); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func (h *Handler) deleteResource(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteResource(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+
 // --- Health ---
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {

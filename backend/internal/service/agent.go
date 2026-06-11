@@ -175,11 +175,14 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*mo
 	go func() {
 		ctx := context.Background()
 		env := map[string]string{
-			"OPENAI_API_KEY":    os.Getenv("OPENAI_API_KEY"),
-			"ANTHROPIC_API_KEY": os.Getenv("ANTHROPIC_API_KEY"),
+			"AGENT_PROVIDER": os.Getenv("AGENT_PROVIDER"),
+			"AGENT_MODEL":    os.Getenv("AGENT_MODEL"),
+			"AGENT_API_KEY":  os.Getenv("AGENT_API_KEY"),
+			"AGENT_BASE_URL": os.Getenv("AGENT_BASE_URL"),
 		}
+		repoAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", agentID, "repo"))
 		_, err := svc.docker.RunContainer(ctx, agent.ImageTag, containerName,
-			filepath.Join(svc.projectRoot, "builds", agentID, "repo"), port, env)
+			repoAbs, port, env)
 		if err != nil {
 			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0)
 			return

@@ -66,3 +66,12 @@ type Instance struct {
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+type Resource struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Type      string    `json:"type"`
+	Config    string    `json:"config"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

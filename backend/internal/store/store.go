@@ -120,6 +120,15 @@ func (s *Store) Migrate() error {
 		created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS resources (
+		id         TEXT PRIMARY KEY,
+		name       TEXT NOT NULL,
+		type       TEXT NOT NULL DEFAULT 'git',
+		config     TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -128,5 +137,6 @@ func (s *Store) Migrate() error {
 	// Migration: add git auth columns for existing databases
 	s.db.Exec("ALTER TABLE agents ADD COLUMN git_username TEXT DEFAULT ''")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN git_password TEXT DEFAULT ''")
+	s.db.Exec("ALTER TABLE instances ADD COLUMN error_msg TEXT DEFAULT ''")
 	return nil
 }

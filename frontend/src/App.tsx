@@ -10,6 +10,8 @@ import TemplateEditPage from './pages/TemplateEditPage'
 import AgentsPage from './pages/AgentsPage'
 import InstancesPage from './pages/InstancesPage'
 import ChatPage from './pages/ChatPage'
+import ResourcesPage from './pages/ResourcesPage'
+import ModelsPage from './pages/ModelsPage'
 
 const navItems = [
   { to: '/prompts', label: 'Prompts' },
@@ -18,6 +20,8 @@ const navItems = [
   { to: '/templates', label: 'Templates' },
   { to: '/agents', label: 'Agents' },
   { to: '/instances', label: 'Instances' },
+  { to: '/models', label: 'Models' },
+  { to: '/resources', label: 'Resources' },
 ]
 
 function App() {
@@ -51,6 +55,8 @@ function App() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/instances" element={<InstancesPage />} />
           <Route path="/instances/:id/chat" element={<ChatPage />} />
+          <Route path="/models" element={<ModelsPage />} />
+          <Route path="/resources" element={<ResourcesPage />} />
         </Routes>
       </main>
     </div>

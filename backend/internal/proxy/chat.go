@@ -7,12 +7,28 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+var proxyClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: func(req *http.Request) (*url.URL, error) {
+			return nil, nil
+		},
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	},
+	Timeout: 60 * time.Second,
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
@@ -60,7 +76,7 @@ func HandleChat(containerHost string, containerPort int) http.HandlerFunc {
 func proxyChatToContainer(conn *websocket.Conn, containerURL, message string) {
 	reqBody, _ := json.Marshal(map[string]string{"message": message})
 
-	resp, err := http.Post(containerURL+"/chat", "application/json", bytes.NewReader(reqBody))
+	resp, err := proxyClient.Post(containerURL+"/chat", "application/json", bytes.NewReader(reqBody))
 	if err != nil {
 		sendWSEvent(conn, "error", map[string]string{"message": fmt.Sprintf("container unreachable: %v", err)})
 		return
@@ -105,3 +121,24 @@ func sendWSEvent(conn *websocket.Conn, eventType string, data interface{}) {
 		"data": data,
 	})
 }
+
+// HandleProxy forwards a simple HTTP GET to a container endpoint
+func HandleProxy(containerHost string, containerPort int, path string) http.HandlerFunc {
+	url := fmt.Sprintf("http://%s:%d%s", containerHost, containerPort, path)
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := proxyClient.Get(url)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		for k, vs := range resp.Header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	}
+}
+

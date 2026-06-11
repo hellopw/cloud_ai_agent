@@ -139,6 +139,11 @@ func NewRouter(h *Handler) http.Handler {
 	})
 	mux.HandleFunc("/api/instances/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/instances/")
+		if strings.HasSuffix(path, "/status") {
+			id := strings.TrimSuffix(path, "/status")
+			proxy.HandleProxy("localhost", h.getInstancePort(id), "/status")(w, r)
+			return
+		}
 		if strings.HasSuffix(path, "/chat") {
 			id := strings.TrimSuffix(path, "/chat")
 			proxy.HandleChat("localhost", h.getInstancePort(id))(w, r)
@@ -152,6 +157,23 @@ func NewRouter(h *Handler) http.Handler {
 	})
 
 	mux.HandleFunc("/api/health", h.health)
+
+	mux.HandleFunc("/api/resources", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET": h.listResources(w, r)
+		case "POST": h.createResource(w, r)
+		default: methodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/resources/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/resources/")
+		switch r.Method {
+		case "GET": h.getResource(w, r, id)
+		case "PUT": h.updateResource(w, r, id)
+		case "DELETE": h.deleteResource(w, r, id)
+		default: methodNotAllowed(w)
+		}
+	})
 
 	return corsMiddleware(mux)
 }

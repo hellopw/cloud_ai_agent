@@ -51,9 +51,9 @@ func (s *Service) RunContainer(ctx context.Context, imageTag, containerName, rep
 	args = append(args, imageTag)
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("docker run failed: %w", err)
+		return "", fmt.Errorf("docker run failed: %s: %w", string(output), err)
 	}
 
 	return string(output), nil
@@ -70,7 +70,7 @@ func (s *Service) StopContainer(ctx context.Context, containerID string) error {
 
 func (s *Service) GetContainerPort(containerID string) string {
 	cmd := exec.Command("docker", "port", containerID, "3000")
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return ""
 	}

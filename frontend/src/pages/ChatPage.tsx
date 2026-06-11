@@ -1,11 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { instancesApi } from '../api/client'
-
-interface WSEvent {
-  type: string
-  data: any
-}
 
 interface Message {
   role: 'user' | 'assistant' | 'tool' | 'system'
@@ -19,8 +13,30 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [connected, setConnected] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
+  const [containerInfo, setContainerInfo] = useState<{ provider?: string; model?: string }>({})
+  const [instanceInfo, setInstanceInfo] = useState<{ host_port: number; status: string }>({ host_port: 0, status: '' })
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const streamingRef = useRef('')
+
+  useEffect(() => {
+    // Fetch instance info
+    fetch('/api/instances/' + id)
+      .then(r => r.json())
+      .then(data => setInstanceInfo(data))
+      .catch(() => {})
+  }, [id])
+
+
+  // Fetch container status via backend proxy
+  useEffect(() => {
+    if (id) {
+      fetch('/api/instances/' + id + '/status')
+        .then(r => r.json())
+        .then(data => setContainerInfo(data))
+        .catch(() => {})
+    }
+  }, [id])
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -30,11 +46,12 @@ export default function ChatPage() {
     ws.onclose = () => setConnected(false)
 
     ws.onmessage = (event) => {
-      const msg: WSEvent = JSON.parse(event.data)
+      const msg = JSON.parse(event.data)
 
       switch (msg.type) {
         case 'text_delta':
-          setStreamingContent((prev) => prev + (msg.data.delta || ''))
+          streamingRef.current += (msg.data.delta || '')
+          setStreamingContent(streamingRef.current)
           break
         case 'tool_call':
           const tc = msg.data
@@ -51,12 +68,11 @@ export default function ChatPage() {
           }])
           break
         case 'agent_end':
-          setStreamingContent((prev) => {
-            if (prev) {
-              setMessages((msgs) => [...msgs, { role: 'assistant', content: prev }])
-            }
-            return ''
-          })
+          if (streamingRef.current) {
+            setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+          }
+          streamingRef.current = ''
+          setStreamingContent('')
           break
         case 'error':
           setMessages((prev) => [...prev, { role: 'system', content: `Error: ${msg.data.message}` }])
@@ -97,10 +113,19 @@ export default function ChatPage() {
         background: 'var(--sidebar-bg)',
       }}>
         <Link to="/instances" className="btn btn-ghost" style={{ fontSize: 12 }}>Back</Link>
-        <h3 style={{ fontSize: 15, margin: 0 }}>Chat with Instance {id?.substring(0, 8)}...</h3>
+        <h3 style={{ fontSize: 15, margin: 0 }}>Instance {id?.substring(0, 8)}...</h3>
         <span className={`tag ${connected ? 'tag-ready' : 'tag-failed'}`}>
           {connected ? 'connected' : 'disconnected'}
         </span>
+        {containerInfo.provider && (
+          <>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>|</span>
+            <span className="tag tag-draft">{containerInfo.provider}</span>
+            {containerInfo.model && (
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{containerInfo.model}</span>
+            )}
+          </>
+        )}
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
