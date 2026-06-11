@@ -156,7 +156,24 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
-	mux.HandleFunc("/api/health", h.health)
+		mux.HandleFunc("/api/provider-configs", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET": h.listProviderConfigs(w, r)
+		case "POST": h.createProviderConfig(w, r)
+		default: methodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/provider-configs/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/provider-configs/")
+		switch r.Method {
+		case "GET": h.getProviderConfig(w, r, id)
+		case "PUT": h.updateProviderConfig(w, r, id)
+		case "DELETE": h.deleteProviderConfig(w, r, id)
+		default: methodNotAllowed(w)
+		}
+	})
+
+mux.HandleFunc("/api/health", h.health)
 
 	mux.HandleFunc("/api/resources", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

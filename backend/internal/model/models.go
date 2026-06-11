@@ -75,3 +75,14 @@ type Resource struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type ProviderConfig struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Provider  string    `json:"provider"`
+	ModelID   string    `json:"model_id"`
+	APIKey    string    `json:"api_key,omitempty"`
+	BaseURL   string    `json:"base_url,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

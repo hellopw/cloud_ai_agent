@@ -494,6 +494,76 @@ func (h *Handler) deleteResource(w http.ResponseWriter, r *http.Request, id stri
 
 // --- Health ---
 
+
+// --- Provider Configs ---
+
+func (h *Handler) listProviderConfigs(w http.ResponseWriter, r *http.Request) {
+	configs, err := h.store.ListProviderConfigs()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, configs)
+}
+
+func (h *Handler) getProviderConfig(w http.ResponseWriter, r *http.Request, id string) {
+	pc, err := h.store.GetProviderConfig(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if pc == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, pc)
+}
+
+func (h *Handler) createProviderConfig(w http.ResponseWriter, r *http.Request) {
+	var pc model.ProviderConfig
+	if err := decodeJSON(r, &pc); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateProviderConfig(&pc); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, pc)
+}
+
+func (h *Handler) updateProviderConfig(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetProviderConfig(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var pc model.ProviderConfig
+	if err := decodeJSON(r, &pc); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	pc.ID = existing.ID
+	// Preserve api_key if not re-submitted
+	if pc.APIKey == "" {
+		pc.APIKey = existing.APIKey
+	}
+	if err := h.store.UpdateProviderConfig(&pc); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, pc)
+}
+
+func (h *Handler) deleteProviderConfig(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteProviderConfig(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
+
+
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

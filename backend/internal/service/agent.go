@@ -99,6 +99,14 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 		svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
 		return err
 	}
+	// Copy MCP client to build context root
+	mcpClientSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "mcp-client.js")
+	if mcpData, err := os.ReadFile(mcpClientSrc); err == nil {
+		if err := os.WriteFile(filepath.Join(buildDir, "mcp-client.js"), mcpData, 0644); err != nil {
+			svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
+			return err
+		}
+	}
 
 	// Generate tool extensions
 	if err := svc.writeToolExtensions(buildDir, tmpl.ToolIDs); err != nil {
@@ -192,3 +200,4 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID string) (*mo
 
 	return instance, nil
 }
+

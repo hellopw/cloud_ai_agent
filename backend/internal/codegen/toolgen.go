@@ -29,6 +29,11 @@ type HandlerDef struct {
 	Body    string            `json:"body,omitempty"`
 	Command string            `json:"command,omitempty"`
 	Code    string            `json:"code,omitempty"`
+	// MCP-specific fields
+	Transport string            `json:"transport,omitempty"` // "stdio" or "sse"
+	Args      []string          `json:"args,omitempty"`      // stdio: server arguments
+	Env       map[string]string `json:"env,omitempty"`       // stdio: extra env vars
+	ToolName  string            `json:"tool_name,omitempty"` // MCP tool to call; empty = discover all
 }
 
 const toolTemplate = `// Auto-generated tool: {{.Name}}
@@ -117,6 +122,8 @@ func generateExecuteBody(h HandlerDef) string {
 		return generateShellBody(h)
 	case "javascript":
 		return h.Code
+	case "mcp":
+		return generateMCPBody(h)
 	default:
 		return fmt.Sprintf("      throw new Error(%q);", "unsupported handler type: "+h.Type)
 	}
@@ -153,4 +160,57 @@ func extractEnv(value string) string {
 		}
 	}
 	return ""
+}
+
+func generateMCPBody(h HandlerDef) string {
+	if h.Transport == "" {
+		h.Transport = "stdio"
+	}
+	if h.ToolName != "" {
+		return generateMCPSingleToolBody(h)
+	}
+	return generateMCPDiscoverBody(h)
+}
+
+func generateMCPSingleToolBody(h HandlerDef) string {
+	cmdJSON, _ := json.Marshal(h.Command)
+	argsJSON, _ := json.Marshal(h.Args)
+	envJSON, _ := json.Marshal(h.Env)
+	toolNameJSON, _ := json.Marshal(h.ToolName)
+	transportJSON, _ := json.Marshal(h.Transport)
+
+	return fmt.Sprintf(
+		`      const { callMcpTool } = await import("./mcp-client.js");
+      const result = await callMcpTool({
+        transport: %s,
+        command: %s,
+        args: %s,
+        env: %s,
+        toolName: %s,
+        toolArgs: args,
+        signal,
+      });
+      return result;`,
+		transportJSON, cmdJSON, argsJSON, envJSON, toolNameJSON,
+	)
+}
+
+func generateMCPDiscoverBody(h HandlerDef) string {
+	cmdJSON, _ := json.Marshal(h.Command)
+	argsJSON, _ := json.Marshal(h.Args)
+	envJSON, _ := json.Marshal(h.Env)
+	transportJSON, _ := json.Marshal(h.Transport)
+
+	return fmt.Sprintf(
+		`      const { listMcpTools } = await import("./mcp-client.js");
+      const tools = await listMcpTools({
+        transport: %s,
+        command: %s,
+        args: %s,
+        env: %s,
+        signal,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(tools, null, 2) }] };`,
+		transportJSON, cmdJSON, argsJSON, envJSON,
+	)
 }

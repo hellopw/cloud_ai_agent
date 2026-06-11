@@ -129,6 +129,17 @@ func (s *Store) Migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS provider_configs (
+		id         TEXT PRIMARY KEY,
+		name       TEXT NOT NULL UNIQUE,
+		provider   TEXT NOT NULL DEFAULT 'openai-codex',
+		model_id   TEXT NOT NULL DEFAULT '',
+		api_key    TEXT NOT NULL DEFAULT '',
+		base_url   TEXT DEFAULT '',
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
 	`
 	if _, err := s.db.Exec(schema); err != nil {
 		return err

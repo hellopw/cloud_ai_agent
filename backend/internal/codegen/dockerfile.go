@@ -11,6 +11,7 @@ type DockerfileData struct {
 	PromptsDir    string
 	ExtensionsDir string
 	WrapperScript string
+	McpClient     string
 	ExposePort    int
 	CustomContent string
 }
@@ -33,6 +34,7 @@ RUN npm init -y && npm install --ignore-scripts @earendil-works/pi-agent-core @e
 
 # Copy HTTP wrapper
 COPY {{.WrapperScript}} ./server.js
+{{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
 RUN mkdir -p /workspace
@@ -50,6 +52,9 @@ func GenerateDockerfile(data *DockerfileData) (string, error) {
 	}
 	if data.WrapperScript == "" {
 		data.WrapperScript = "server.js"
+	}
+	if data.McpClient == "" {
+		data.McpClient = "mcp-client.js"
 	}
 	if data.SkillsDir == "" {
 		data.SkillsDir = "pi-skills"
