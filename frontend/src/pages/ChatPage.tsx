@@ -85,6 +85,27 @@ export default function ChatPage() {
             content: `Result from tool: ${JSON.stringify(msg.data.content).substring(0, 200)}`,
           }])
           break
+        case 'message_update':
+          const me = msg.data?.assistantMessageEvent
+          if (!me) break
+          switch (me.type) {
+            case 'thinking_delta':
+              if (!streamingRef.current.startsWith('[Thinking]\n')) {
+                streamingRef.current = '[Thinking]\n' + streamingRef.current
+              }
+              streamingRef.current += (me.delta || '')
+              setStreamingContent(streamingRef.current)
+              break
+            case 'text_delta':
+              // Add a separator when switching from thinking to text
+              if (streamingRef.current && !streamingRef.current.endsWith('\n\n')) {
+                streamingRef.current += '\n\n'
+              }
+              streamingRef.current += (me.delta || '')
+              setStreamingContent(streamingRef.current)
+              break
+          }
+          break
         case 'agent_end':
           if (streamingRef.current) {
             setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
@@ -93,8 +114,13 @@ export default function ChatPage() {
           setStreamingContent('')
           break
         case 'message_end':
-          if (msg.data?.message?.stopReason === 'error') {
-            setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (msg.data.message.errorMessage || 'Unknown error') }])
+          const me2 = msg.data
+          if (me2?.message?.stopReason === 'error') {
+            setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (me2.message.errorMessage || 'Unknown error') }])
+          } else if (streamingRef.current) {
+            setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+            streamingRef.current = ''
+            setStreamingContent('')
           }
           break
         case 'error':
@@ -218,6 +244,26 @@ export default function ChatPage() {
           content: 'Result from tool: ' + JSON.stringify(eventData.data.content).substring(0, 200),
         }])
         break
+      case 'message_update':
+        const me3 = eventData.data?.assistantMessageEvent
+        if (!me3) break
+        switch (me3.type) {
+          case 'thinking_delta':
+            if (!streamingRef.current.startsWith('[Thinking]\n')) {
+              streamingRef.current = '[Thinking]\n' + streamingRef.current
+            }
+            streamingRef.current += (me3.delta || '')
+            setStreamingContent(streamingRef.current)
+            break
+          case 'text_delta':
+            if (streamingRef.current && !streamingRef.current.endsWith('\n\n')) {
+              streamingRef.current += '\n\n'
+            }
+            streamingRef.current += (me3.delta || '')
+            setStreamingContent(streamingRef.current)
+            break
+        }
+        break
       case 'agent_end':
         if (streamingRef.current) {
           setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
@@ -226,8 +272,13 @@ export default function ChatPage() {
         setStreamingContent('')
         break
       case 'message_end':
-        if (eventData.data?.message?.stopReason === 'error') {
-          setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (eventData.data.message.errorMessage || 'Unknown error') }])
+        const me4 = eventData.data
+        if (me4?.message?.stopReason === 'error') {
+          setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (me4.message.errorMessage || 'Unknown error') }])
+        } else if (streamingRef.current) {
+          setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+          streamingRef.current = ''
+          setStreamingContent('')
         }
         break
       case 'error':
