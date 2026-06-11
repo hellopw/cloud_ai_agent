@@ -195,13 +195,16 @@ function setupAgent() {
   let model;
   try {
     model = getModel(provider, modelId);
-    // Override baseUrl if provided
-    if (baseUrl) {
+    if (model && baseUrl) {
       model = { ...model, baseUrl };
     }
   } catch (e) {
     console.error(`Failed to get model ${provider}/${modelId}:`, e.message);
-    console.error("Falling back to default model");
+    model = null;
+  }
+
+  if (!model) {
+    console.error(`Falling back to default model for ${provider}/${modelId}`);
     model = {
       id: modelId,
       name: modelId,
