@@ -8,7 +8,7 @@ import (
 func TestGenerateDockerfile(t *testing.T) {
 	df, err := GenerateDockerfile(&DockerfileData{NodeVersion: "22", ExposePort: 3000})
 	if err != nil { t.Fatalf("GenerateDockerfile: %v", err) }
-	for _, c := range []string{"FROM node:22-alpine", "WORKDIR /app", "EXPOSE 3000"} {
+	for _, c := range []string{"FROM private-registry.sohucs.com/domeos-pub/node:22.14.0-alpine3.21", "WORKDIR /app", "EXPOSE 3000"} {
 		if !strings.Contains(df, c) { t.Errorf("missing: %s", c) }
 	}
 }

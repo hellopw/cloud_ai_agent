@@ -14,8 +14,10 @@ import ResourcesPage from './pages/ResourcesPage'
 import ModelsPage from './pages/ModelsPage'
 import AgentTeamsPage from './pages/AgentTeamsPage'
 import AgentTeamEditPage from './pages/AgentTeamEditPage'
+import AgentPage from './pages/AgentPage'
 
 const navItems = [
+  { to: '/agent', label: 'Agent' },
   { to: '/prompts', label: 'Prompts' },
   { to: '/skills', label: 'Skills' },
   { to: '/tools', label: 'Tools' },
@@ -43,6 +45,7 @@ function App() {
       <main className="content">
         <Routes>
           <Route path="/" element={<PromptsPage />} />
+          <Route path="/agent" element={<AgentPage />} />
           <Route path="/prompts" element={<PromptsPage />} />
           <Route path="/prompts/new" element={<PromptEditPage />} />
           <Route path="/prompts/:id" element={<PromptEditPage />} />

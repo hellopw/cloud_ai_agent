@@ -51,14 +51,15 @@ func (s *Store) loadTeamBindings(t *model.AgentTeam) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
+			rows.Close()
 			return err
 		}
 		t.PromptIDs = append(t.PromptIDs, id)
 	}
+	rows.Close()
 
 	rows2, err := s.db.Query("SELECT skill_id FROM agent_team_skills WHERE team_id = ?", t.ID)
 	if err != nil {
@@ -80,13 +81,24 @@ func (s *Store) loadTeamMembers(t *model.AgentTeam) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
+	type memberRow struct {
+		m model.TeamMember
+	}
+	memberRows := make([]memberRow, 0)
 	for rows.Next() {
 		var m model.TeamMember
 		if err := rows.Scan(&m.ID, &m.TeamID, &m.Name, &m.Role, &m.AgentTemplateID, &m.ProviderConfigID, &m.SystemPromptOverride, &m.Sequence, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			rows.Close()
 			return err
 		}
+		memberRows = append(memberRows, memberRow{m: m})
+	}
+	rows.Close()
+
+	for i := range memberRows {
+		mr := &memberRows[i]
+		m := &mr.m
 
 		// load member prompts
 		pr, err := s.db.Query("SELECT prompt_id FROM team_member_prompts WHERE team_member_id = ?", m.ID)
@@ -124,9 +136,9 @@ func (s *Store) loadTeamMembers(t *model.AgentTeam) error {
 		}
 		tl.Close()
 
-		t.Members = append(t.Members, m)
+		t.Members = append(t.Members, *m)
 	}
-	return rows.Err()
+	return nil
 }
 
 func (s *Store) CreateAgentTeam(t *model.AgentTeam) error {
