@@ -257,6 +257,26 @@ function setupAgent() {
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
+// ---- API call logging ----
+const _fetch = globalThis.fetch;
+globalThis.fetch = async (url, opts) => {
+  const start = Date.now();
+  const method = opts?.method || 'GET';
+  const body = opts?.body ? (typeof opts.body === 'string' ? opts.body.substring(0, 500) : '[stream]') : '';
+  console.log(`[API] --> ${method} ${url} body=${body}`);
+  try {
+    const resp = await _fetch(url, opts);
+    const clone = resp.clone();
+    const text = await clone.text();
+    const elapsed = Date.now() - start;
+    console.log(`[API] <-- ${resp.status} ${elapsed}ms body=${text.substring(0, 2000)}`);
+    return resp;
+  } catch (e) {
+    console.log(`[API] <-- ERROR ${Date.now() - start}ms ${e.message}`);
+    throw e;
+  }
+};
+
 let agent;
 
 app.get("/status", (req, res) => {
