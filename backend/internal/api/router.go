@@ -77,6 +77,23 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
+	mux.HandleFunc("/api/memories", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET": h.listMemories(w, r)
+		case "POST": h.createMemory(w, r)
+		default: methodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/memories/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/memories/")
+		switch r.Method {
+		case "GET": h.getMemory(w, r, id)
+		case "PUT": h.updateMemory(w, r, id)
+		case "DELETE": h.deleteMemory(w, r, id)
+		default: methodNotAllowed(w)
+		}
+	})
+
 	mux.HandleFunc("/api/templates", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET": h.listTemplates(w, r)
@@ -116,12 +133,6 @@ func NewRouter(h *Handler) http.Handler {
 		if strings.HasSuffix(path, "/build") {
 			id := strings.TrimSuffix(path, "/build")
 			if r.Method == "POST" { h.buildAgent(w, r, id) } else { methodNotAllowed(w) }
-			return
-		}
-		if strings.HasSuffix(path, "/start") {
-			id := strings.TrimSuffix(path, "/start")
-			if r.Method == "POST" { h.startInstance(w, r, id) } else { methodNotAllowed(w) }
-			return
 		}
 		switch r.Method {
 		case "GET": h.getAgent(w, r, path)
@@ -134,11 +145,17 @@ func NewRouter(h *Handler) http.Handler {
 	mux.HandleFunc("/api/instances", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET": h.listInstances(w, r)
+		case "POST": h.startInstance(w, r)
 		default: methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/instances/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/instances/")
+		if strings.HasSuffix(path, "/stop") {
+			id := strings.TrimSuffix(path, "/stop")
+			if r.Method == "POST" { h.stopInstance(w, r, id) } else { methodNotAllowed(w) }
+			return
+		}
 		if strings.HasSuffix(path, "/status") {
 			id := strings.TrimSuffix(path, "/status")
 			proxy.HandleProxy("localhost", h.getInstancePort(id), "/status")(w, r)

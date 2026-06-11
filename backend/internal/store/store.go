@@ -31,13 +31,8 @@ func New(dbPath string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (s *Store) DB() *sql.DB {
-	return s.db
-}
-
-func (s *Store) Close() error {
-	return s.db.Close()
-}
+func (s *Store) DB() *sql.DB { return s.db }
+func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) Migrate() error {
 	schema := `
@@ -67,6 +62,22 @@ func (s *Store) Migrate() error {
 		dsl_definition TEXT NOT NULL DEFAULT '{}',
 		created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS memories (
+		id          TEXT PRIMARY KEY,
+		name        TEXT NOT NULL UNIQUE,
+		description TEXT DEFAULT '',
+		content     TEXT NOT NULL DEFAULT '',
+		source      TEXT NOT NULL DEFAULT 'manual',
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS instance_memories (
+		instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+		memory_id   TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+		PRIMARY KEY (instance_id, memory_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS templates (
@@ -133,8 +144,6 @@ func (s *Store) Migrate() error {
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
 	}
-
-	// Migration: add git auth columns for existing databases
 	s.db.Exec("ALTER TABLE agents ADD COLUMN git_username TEXT DEFAULT ''")
 	s.db.Exec("ALTER TABLE agents ADD COLUMN git_password TEXT DEFAULT ''")
 	s.db.Exec("ALTER TABLE instances ADD COLUMN error_msg TEXT DEFAULT ''")
