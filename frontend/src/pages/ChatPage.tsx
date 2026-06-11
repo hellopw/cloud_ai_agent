@@ -92,9 +92,16 @@ export default function ChatPage() {
           streamingRef.current = ''
           setStreamingContent('')
           break
+        case 'message_end':
+          if (msg.data?.message?.stopReason === 'error') {
+            setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (msg.data.message.errorMessage || 'Unknown error') }])
+          }
+          break
         case 'error':
           setMessages((prev) => [...prev, { role: 'system', content: `Error: ${msg.data.message}` }])
           break
+        default:
+          setMessages((prev) => [...prev, { role: 'system', content: `[${msg.type}] ${JSON.stringify(msg.data).substring(0, 300)}` }])
       }
     }
 
@@ -218,9 +225,16 @@ export default function ChatPage() {
         streamingRef.current = ''
         setStreamingContent('')
         break
+      case 'message_end':
+        if (eventData.data?.message?.stopReason === 'error') {
+          setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (eventData.data.message.errorMessage || 'Unknown error') }])
+        }
+        break
       case 'error':
         setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + eventData.data.message }])
         break
+      default:
+        setMessages((prev) => [...prev, { role: 'system', content: `[${eventData.type}] ${JSON.stringify(eventData.data).substring(0, 300)}` }])
     }
   }
 
