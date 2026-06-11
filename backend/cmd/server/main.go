@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud_ai_agent/internal/api"
+	"cloud_ai_agent/internal/mcp"
 	"cloud_ai_agent/internal/service"
 	"cloud_ai_agent/internal/store"
 )
@@ -36,10 +37,18 @@ func main() {
 	agentSvc := service.NewAgentService(s)
 	h.WithAgentService(agentSvc)
 
+	// Initialize MCP server on SSE transport
+	mcpSrv := mcp.NewServer(s, agentSvc)
+	mcpSSEServer := mcp.NewSSEServer(mcpSrv)
+
 	apiMux := api.NewRouter(h)
 	fs := http.FileServer(http.Dir(frontendDir))
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/mcp") {
+			http.StripPrefix("/api/mcp", mcpSSEServer).ServeHTTP(w, r)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/api") {
 			apiMux.ServeHTTP(w, r)
 			return
