@@ -29,3 +29,13 @@ test_clone*/
 
 # Go build cache
 .go-cache/
+
+# Secrets
+.env
+
+# Build artifacts
+backend/cloud-ai-agent
+frontend/tsconfig.tsbuildinfo
+
+# Test scripts
+_mcp_full_test.mjs
