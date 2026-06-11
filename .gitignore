@@ -26,3 +26,6 @@ Thumbs.db
 builds/
 deploy/
 test_clone*/
+
+# Go build cache
+.go-cache/
