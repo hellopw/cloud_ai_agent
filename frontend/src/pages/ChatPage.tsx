@@ -18,6 +18,72 @@ export default function ChatPage() {
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const streamingRef = useRef('')
+  const rafRef = useRef<number>(0)
+  const needsFlushRef = useRef(false)
+  const idRef = useRef(id)
+
+  // Keep idRef in sync so closures always have the correct instance ID
+  idRef.current = id
+
+  // Batch update streaming content — at most once per animation frame
+  const flushStreaming = () => {
+    needsFlushRef.current = false
+    setStreamingContent(streamingRef.current)
+  }
+
+  const scheduleContentUpdate = () => {
+    if (!needsFlushRef.current) {
+      needsFlushRef.current = true
+      rafRef.current = requestAnimationFrame(flushStreaming)
+    }
+  }
+
+  const cancelPendingFlush = () => {
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = 0
+    }
+    needsFlushRef.current = false
+  }
+
+  // Persist a chat message to the backend
+  const saveMessage = (role: string, content: string, toolCall?: any) => {
+    const instanceId = idRef.current
+    if (!instanceId || !content) {
+      console.warn('[ChatPage] saveMessage skipped', { instanceId, role, hasContent: !!content })
+      return
+    }
+    const url = '/api/instances/' + instanceId + '/messages'
+    console.log('[ChatPage] saveMessage', { url, role, contentLen: content.length })
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, content, tool_call: toolCall ? JSON.stringify(toolCall) : '' }),
+    }).then(r => {
+      if (!r.ok) console.error('[ChatPage] saveMessage failed', r.status, r.statusText)
+    }).catch(e => console.error('[ChatPage] saveMessage error', e))
+  }
+
+  // Load persisted messages on mount
+  useEffect(() => {
+    if (!id) return
+    const url = '/api/instances/' + id + '/messages'
+    console.log('[ChatPage] loading messages from', url)
+    fetch(url)
+      .then(r => r.json())
+      .then((data: any[]) => {
+        console.log('[ChatPage] loaded messages', data.length)
+        if (Array.isArray(data) && data.length > 0) {
+          const msgs: Message[] = data.map((m: any) => ({
+            role: m.role,
+            content: m.content,
+            toolCall: m.tool_call ? JSON.parse(m.tool_call) : undefined,
+          }))
+          setMessages(msgs)
+        }
+      })
+      .catch(() => {})
+  }, [id])
 
   useEffect(() => {
     // Fetch instance info
@@ -69,7 +135,7 @@ export default function ChatPage() {
       switch (msg.type) {
         case 'text_delta':
           streamingRef.current += (msg.data.delta || '')
-          setStreamingContent(streamingRef.current)
+          scheduleContentUpdate()
           break
         case 'tool_call':
           const tc = msg.data
@@ -78,12 +144,14 @@ export default function ChatPage() {
             content: `Calling: ${tc.toolName}`,
             toolCall: { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
           }])
+          saveMessage('tool', `Calling: ${tc.toolName}`, { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input })
           break
         case 'tool_result':
           setMessages((prev) => [...prev, {
             role: 'system',
             content: `Result from tool: ${JSON.stringify(msg.data.content).substring(0, 200)}`,
           }])
+          saveMessage('system', `Result from tool: ${JSON.stringify(msg.data.content).substring(0, 200)}`)
           break
         case 'message_update':
           const me = msg.data?.assistantMessageEvent
@@ -94,7 +162,7 @@ export default function ChatPage() {
                 streamingRef.current = '[Thinking]\n' + streamingRef.current
               }
               streamingRef.current += (me.delta || '')
-              setStreamingContent(streamingRef.current)
+              scheduleContentUpdate()
               break
             case 'text_delta':
               // Add a separator when switching from thinking to text
@@ -102,14 +170,17 @@ export default function ChatPage() {
                 streamingRef.current += '\n\n'
               }
               streamingRef.current += (me.delta || '')
-              setStreamingContent(streamingRef.current)
+              scheduleContentUpdate()
               break
           }
           break
         case 'agent_end':
+          console.log('[ChatPage] agent_end received, streamingLen=' + streamingRef.current.length)
           if (streamingRef.current) {
             setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+            saveMessage('assistant', streamingRef.current)
           }
+          cancelPendingFlush()
           streamingRef.current = ''
           setStreamingContent('')
           break
@@ -119,6 +190,8 @@ export default function ChatPage() {
             setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (me2.message.errorMessage || 'Unknown error') }])
           } else if (streamingRef.current) {
             setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+            saveMessage('assistant', streamingRef.current)
+            cancelPendingFlush()
             streamingRef.current = ''
             setStreamingContent('')
           }
@@ -137,6 +210,7 @@ export default function ChatPage() {
       if (reconnectTimer) clearTimeout(reconnectTimer)
       if (ws) ws.close()
       wsRef.current = null
+      cancelPendingFlush()
     }
   }, [id])
 
@@ -208,7 +282,9 @@ export default function ChatPage() {
       // Signal end of streaming
       if (streamingRef.current) {
         setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+        saveMessage('assistant', streamingRef.current)
       }
+      cancelPendingFlush()
       streamingRef.current = ''
       setStreamingContent('')
     } catch (e: unknown) {
@@ -225,7 +301,7 @@ export default function ChatPage() {
     switch (eventData.type) {
       case 'text_delta':
         streamingRef.current += (eventData.data.delta || '')
-        setStreamingContent(streamingRef.current)
+        scheduleContentUpdate()
         break
       case 'tool_call':
         setMessages((prev) => [...prev, {
@@ -237,12 +313,14 @@ export default function ChatPage() {
             input: eventData.data.input,
           },
         }])
+        saveMessage('tool', 'Calling: ' + eventData.data.toolName, { toolCallId: eventData.data.toolCallId, toolName: eventData.data.toolName, input: eventData.data.input })
         break
       case 'tool_result':
         setMessages((prev) => [...prev, {
           role: 'system',
           content: 'Result from tool: ' + JSON.stringify(eventData.data.content).substring(0, 200),
         }])
+        saveMessage('system', 'Result from tool: ' + JSON.stringify(eventData.data.content).substring(0, 200))
         break
       case 'message_update':
         const me3 = eventData.data?.assistantMessageEvent
@@ -253,21 +331,24 @@ export default function ChatPage() {
               streamingRef.current = '[Thinking]\n' + streamingRef.current
             }
             streamingRef.current += (me3.delta || '')
-            setStreamingContent(streamingRef.current)
+            scheduleContentUpdate()
             break
           case 'text_delta':
             if (streamingRef.current && !streamingRef.current.endsWith('\n\n')) {
               streamingRef.current += '\n\n'
             }
             streamingRef.current += (me3.delta || '')
-            setStreamingContent(streamingRef.current)
+            scheduleContentUpdate()
             break
         }
         break
       case 'agent_end':
+        console.log('[ChatPage] processEvent agent_end, streamingLen=' + streamingRef.current.length)
         if (streamingRef.current) {
           setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+          saveMessage('assistant', streamingRef.current)
         }
+        cancelPendingFlush()
         streamingRef.current = ''
         setStreamingContent('')
         break
@@ -277,6 +358,8 @@ export default function ChatPage() {
           setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (me4.message.errorMessage || 'Unknown error') }])
         } else if (streamingRef.current) {
           setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+          saveMessage('assistant', streamingRef.current)
+          cancelPendingFlush()
           streamingRef.current = ''
           setStreamingContent('')
         }
@@ -301,12 +384,14 @@ export default function ChatPage() {
       // WebSocket not available, fall back to HTTP SSE
       console.log('[ChatPage] handleSend: WebSocket not OPEN (state=' + wsState + '), using HTTP fallback')
       setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+      saveMessage('user', trimmed)
       setInput('')
       sendViaHttp(trimmed)
       return
     }
     console.log('[ChatPage] handleSend: sending via WebSocket')
     setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+    saveMessage('user', trimmed)
     try {
       wsRef.current!.send(JSON.stringify({ type: 'chat', message: trimmed }))
       setInput('')

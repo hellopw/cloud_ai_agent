@@ -113,6 +113,15 @@ type Instance struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type ChatMessage struct {
+	ID         string    `json:"id"`
+	InstanceID string    `json:"instance_id"`
+	Role       string    `json:"role"`
+	Content    string    `json:"content"`
+	ToolCall   string    `json:"tool_call,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type Resource struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`

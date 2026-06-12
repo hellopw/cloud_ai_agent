@@ -171,6 +171,15 @@ func NewRouter(h *Handler) http.Handler {
 			proxy.HandleChat("localhost", h.getInstancePort(id))(w, r)
 			return
 		}
+		if strings.HasSuffix(path, "/messages") {
+			id := strings.TrimSuffix(path, "/messages")
+			switch r.Method {
+			case "GET": h.listChatMessages(w, r, id)
+			case "POST": h.createChatMessage(w, r, id)
+			default: methodNotAllowed(w)
+			}
+			return
+		}
 		switch r.Method {
 		case "GET": h.getInstance(w, r, path)
 		case "DELETE": h.deleteInstance(w, r, path)
@@ -178,7 +187,7 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
-		mux.HandleFunc("/api/provider-configs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/provider-configs", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET": h.listProviderConfigs(w, r)
 		case "POST": h.createProviderConfig(w, r)
@@ -227,7 +236,7 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
-mux.HandleFunc("/api/health", h.health)
+	mux.HandleFunc("/api/health", h.health)
 
 	mux.HandleFunc("/api/resources", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 
 	"cloud_ai_agent/internal/model"
+	"github.com/google/uuid"
 )
 
 // --- Prompts ---
@@ -752,4 +754,35 @@ func (h *Handler) deleteProviderConfig(w http.ResponseWriter, r *http.Request, i
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// --- Chat Messages ---
+
+func (h *Handler) listChatMessages(w http.ResponseWriter, r *http.Request, instanceID string) {
+	msgs, err := h.store.ListChatMessages(instanceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msgs == nil {
+		msgs = []model.ChatMessage{}
+	}
+	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (h *Handler) createChatMessage(w http.ResponseWriter, r *http.Request, instanceID string) {
+	var msg model.ChatMessage
+	if err := decodeJSON(r, &msg); err != nil {
+		log.Printf("[chat-msg] decode error for instance %s: %v", instanceID, err)
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	log.Printf("[chat-msg] saving role=%s content_len=%d for instance %s", msg.Role, len(msg.Content), instanceID)
+	msg.ID = uuid.New().String()
+	msg.InstanceID = instanceID
+	if err := h.store.CreateChatMessage(&msg); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, msg)
 }

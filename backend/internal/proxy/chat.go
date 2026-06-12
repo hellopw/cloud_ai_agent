@@ -111,7 +111,8 @@ func proxyChatToContainer(conn *websocket.Conn, containerURL, message string) {
 				if dataLine != "" { break }
 			}
 			if strings.HasPrefix(dataLine, "data: ") {
-				dataJSON := strings.TrimPrefix(dataLine, "data: ")
+						dataJSON := strings.TrimPrefix(dataLine, "data: ")
+						log.Printf("ws: forwarding event type=%s data_len=%d", eventType, len(dataJSON))
 				mu.Lock()
 				conn.WriteJSON(map[string]interface{}{
 					"type": eventType,

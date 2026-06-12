@@ -212,6 +212,15 @@ func (s *Store) Migrate() error {
 		skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
 		PRIMARY KEY (team_id, skill_id)
 	);
+
+	CREATE TABLE IF NOT EXISTS chat_messages (
+		id          TEXT PRIMARY KEY,
+		instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+		role        TEXT NOT NULL DEFAULT 'user',
+		content     TEXT NOT NULL DEFAULT '',
+		tool_call   TEXT DEFAULT '',
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -225,4 +234,3 @@ func (s *Store) Migrate() error {
 	s.db.Exec("ALTER TABLE templates ADD COLUMN agent_type TEXT DEFAULT 'pi'")
 	return nil
 }
-
