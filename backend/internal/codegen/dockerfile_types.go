@@ -22,7 +22,7 @@ WORKDIR /app
 RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy http://10.18.34.194:3128
 
 # Install Claude Code packages
-RUN npm init -y && npm install --ignore-scripts @anthropic-ai/claude-code-sdk express
+RUN npm init -y && npm install --ignore-scripts @anthropic-ai/sdk express
 
 # Copy skills, prompts, and extensions
 {{if .SkillsDir}}COPY {{.SkillsDir}}/ ./skills/{{end}}

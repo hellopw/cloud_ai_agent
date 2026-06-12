@@ -365,6 +365,10 @@ func (h *Handler) getBuildLog(w http.ResponseWriter, r *http.Request, id string)
 	if os.Getenv("PROJECT_ROOT") != "" {
 		logPath = filepath.Join(os.Getenv("PROJECT_ROOT"), "builds", id, "build.log")
 	}
+	// Fallback: try current directory (binary runs from project root on deployed server)
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		logPath = filepath.Join(".", "builds", id, "build.log")
+	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "build log not found")
@@ -638,6 +642,10 @@ func (h *Handler) getTeamBuildLog(w http.ResponseWriter, r *http.Request, id str
 	logPath := filepath.Join("..", "builds", id, "build.log")
 	if os.Getenv("PROJECT_ROOT") != "" {
 		logPath = filepath.Join(os.Getenv("PROJECT_ROOT"), "builds", id, "build.log")
+	}
+	// Fallback: try current directory (binary runs from project root on deployed server)
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		logPath = filepath.Join(".", "builds", id, "build.log")
 	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {
