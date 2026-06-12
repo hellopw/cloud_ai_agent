@@ -180,6 +180,23 @@ func NewRouter(h *Handler) http.Handler {
 			}
 			return
 		}
+		if strings.HasSuffix(path, "/llm-logs") {
+			rest := strings.TrimSuffix(path, "/llm-logs")
+			// /api/instances/<id>/llm-logs/<filename>
+			if strings.HasPrefix(rest, "/") {
+				parts := strings.SplitN(strings.TrimPrefix(rest, "/"), "/", 2)
+				if len(parts) == 2 && parts[1] != "" {
+					h.getLLMLogFile(w, r, parts[0], parts[1])
+					return
+				}
+				if len(parts) == 1 {
+					h.listLLMLogs(w, r, parts[0])
+					return
+				}
+			}
+			writeError(w, http.StatusBadRequest, "invalid llm-logs path")
+			return
+		}
 		switch r.Method {
 		case "GET": h.getInstance(w, r, path)
 		case "DELETE": h.deleteInstance(w, r, path)

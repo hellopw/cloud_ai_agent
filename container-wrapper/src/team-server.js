@@ -5,12 +5,18 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { createLLMLogger } from "./llm-logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
 mkdirSync(workspaceDir, { recursive: true });
 
 const env = new NodeExecutionEnv({ cwd: workspaceDir });
+
+// LLM logger setup
+const logsDir = process.env.LOGS_DIR || "/logs";
+const instanceId = process.env.INSTANCE_ID || "unknown";
+const rootLogger = createLLMLogger(logsDir, instanceId);
 
 // ---- Built-in tools (shared by all agents) ----
 
@@ -229,7 +235,7 @@ function setupAgent(memberConfig, additionalTools = []) {
     },
   });
 
-  return agent;
+  return { agent, model, tools: allTools };
 }
 
 // ---- Load team manifest ----
@@ -248,6 +254,8 @@ try {
 
 const agents = {};       // name -> Agent instance
 const memberConfigs = {}; // name -> member config
+const memberModels = {};  // name -> model info
+const memberTools = {};   // name -> tools array
 let leaderName = null;
 
 for (const member of manifest.members) {
@@ -260,12 +268,8 @@ for (const member of manifest.members) {
   };
 
   memberConfigs[member.name] = memberConfig;
-
   console.log(`Setting up agent: ${member.name} (${member.role}) with ${memberConfig.provider}/${memberConfig.model_id}`);
 }
-
-// Leader is set up lazily with delegate_task tool (needs workers initialized first)
-// Workers are set up eagerly
 
 function getDelegateTool() {
   const workerNames = manifest.members
@@ -312,6 +316,79 @@ function getDelegateTool() {
   };
 }
 
+// ---- Per-agent active sequence tracking for fetch logging ----
+const activeSeqs = {}; // agentName -> current seq string
+
+// ---- Fetch monkey-patch with per-agent logging ----
+const _fetch = globalThis.fetch;
+globalThis.fetch = async (url, opts) => {
+  const start = Date.now();
+  const method = opts?.method || "GET";
+  const activeSeq = activeSeqs[leaderName] || Object.values(activeSeqs).find(s => s);
+
+  // Log request if any agent has an active session
+  if (activeSeq) {
+    const bodyStr = opts?.body;
+    let parsedBody = "";
+    try {
+      parsedBody = bodyStr ? JSON.parse(typeof bodyStr === "string" ? bodyStr : "[stream]") : "";
+    } catch {
+      parsedBody = typeof bodyStr === "string" ? bodyStr.substring(0, 2000) : "[stream]";
+    }
+    // Write to root logger (team-level), figure out which agent's seq
+    for (const [name, seq] of Object.entries(activeSeqs)) {
+      if (seq) {
+        rootLogger.logRequest(seq, { method, url, body: parsedBody, agent: name });
+      }
+    }
+  }
+
+  console.log(`[API] --> ${method} ${url} body=${typeof opts?.body === "string" ? opts.body.substring(0, 500) : "[stream]"}`);
+
+  try {
+    const resp = await _fetch(url, opts);
+    const clone = resp.clone();
+    const elapsed = Date.now() - start;
+
+    if (activeSeq) {
+      const text = await clone.text();
+      const isStream = resp.headers.get("content-type")?.includes("text/event-stream");
+      if (isStream) {
+        const lines = text.split("\n").filter(Boolean);
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              for (const seq of Object.values(activeSeqs).filter(Boolean)) {
+                rootLogger.appendResponseLine(seq, data);
+              }
+            } catch {
+              // raw SSE line, skip
+            }
+          }
+        }
+      }
+      for (const seq of Object.values(activeSeqs).filter(Boolean)) {
+        rootLogger.appendResponseLine(seq, {
+          type: "http_response",
+          status: resp.status,
+          elapsed_ms: elapsed,
+          content_type: resp.headers.get("content-type"),
+        });
+      }
+    }
+
+    console.log(`[API] <-- ${resp.status} ${elapsed}ms body=${text.substring(0, 2000)}`);
+    return resp;
+  } catch (e) {
+    for (const seq of Object.values(activeSeqs).filter(Boolean)) {
+      rootLogger.appendResponseLine(seq, { type: "fetch_error", message: e.message });
+    }
+    console.log(`[API] <-- ERROR ${Date.now() - start}ms ${e.message}`);
+    throw e;
+  }
+};
+
 // ---- Worker delegation (internal HTTP call) ----
 
 async function delegateToWorker(workerName, task) {
@@ -342,7 +419,6 @@ async function delegateToWorker(workerName, task) {
         messages.push({ type: "error", message: err.message });
       })
       .finally(() => {
-        // Wait a tick for events to flush
         setTimeout(() => {
           sub.unsubscribe();
           const textMessages = messages
@@ -378,25 +454,45 @@ function getLeaderAgent() {
         break;
       }
     }
-    // If no explicit leader, use first member
     if (!leaderName) {
       leaderName = manifest.members[0]?.name;
     }
 
-    leaderAgent = setupAgent(memberConfigs[leaderName], [getDelegateTool()]);
-    agents[leaderName] = leaderAgent;
+    const result = setupAgent(memberConfigs[leaderName], [getDelegateTool()]);
+    leaderAgent = result.agent;
+    agents[leaderName] = result.agent;
+    memberModels[leaderName] = result.model;
+    memberTools[leaderName] = result.tools;
     console.log(`Leader agent "${leaderName}" initialized`);
   }
   return leaderAgent;
 }
 
-// Initialize workers eagerly
+// Initialize workers eagerly, with per-agent snapshots
 for (const member of manifest.members) {
   if (member.role !== "leader") {
-    agents[member.name] = setupAgent(memberConfigs[member.name]);
+    const result = setupAgent(memberConfigs[member.name]);
+    agents[member.name] = result.agent;
+    memberModels[member.name] = result.model;
+    memberTools[member.name] = result.tools;
     console.log(`Worker agent "${member.name}" initialized`);
+
+    // Write per-agent snapshots on startup
+    rootLogger.newSession(member.name);
+    rootLogger.writeToolsSnapshot(result.tools);
+    const agentSkillsDir = join("/app/agents", member.name, "pi-skills");
+    const agentPromptsDir = join("/app/agents", member.name, "pi-prompts");
+    rootLogger.writeSkillsSnapshot(agentSkillsDir);
+    rootLogger.writePromptsSnapshot(agentPromptsDir);
   }
 }
+
+// Also write team-level snapshots
+rootLogger.newSession("team");
+const teamSkillsDir = process.env.SKILLS_DIR || "/app/team-skills";
+const teamPromptsDir = process.env.PROMPTS_DIR || "/app/team-prompts";
+rootLogger.writeSkillsSnapshot(teamSkillsDir);
+rootLogger.writePromptsSnapshot(teamPromptsDir);
 
 app.get("/status", (req, res) => {
   const statuses = manifest.members.map((m) => ({
@@ -423,6 +519,17 @@ app.post("/chat", async (req, res) => {
 
   const leader = getLeaderAgent();
 
+  // Init logging session for leader
+  rootLogger.newSession(leaderName);
+  if (memberTools[leaderName]) {
+    rootLogger.writeToolsSnapshot(memberTools[leaderName]);
+  }
+  const leaderSkillsDir = join("/app/agents", leaderName, "pi-skills");
+  const leaderPromptsDir = join("/app/agents", leaderName, "pi-prompts");
+  rootLogger.writeSkillsSnapshot(leaderSkillsDir);
+  rootLogger.writePromptsSnapshot(leaderPromptsDir);
+  activeSeqs[leaderName] = rootLogger.nextSeq();
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -436,11 +543,21 @@ app.post("/chat", async (req, res) => {
       sendEvent(event.type, event);
     });
 
+    // Track delegation to workers
+    const origDelegate = leader._tools?.find?.(t => t.name === "delegate_task");
+    // We can't easily intercept the delegate execute, but the fetch monkey-patch
+    // will capture the worker's LLM calls automatically if the worker uses fetch.
+
     await leader.prompt(message);
     sendEvent("agent_end", { stopReason: "end_turn" });
+    rootLogger.appendResponseLine(activeSeqs[leaderName], { type: "agent_end", stopReason: "end_turn" });
   } catch (err) {
     sendEvent("error", { message: err.message });
+    if (activeSeqs[leaderName]) {
+      rootLogger.appendResponseLine(activeSeqs[leaderName], { type: "fatal_error", message: err.message, stack: err.stack });
+    }
   } finally {
+    activeSeqs[leaderName] = null;
     res.end();
   }
 });
@@ -468,11 +585,22 @@ app.post("/internal/agents/:name/chat", async (req, res) => {
     return res.status(404).json({ error: `worker "${name}" not found` });
   }
 
+  // Track worker execution in its own log subdirectory
+  rootLogger.newSession(name);
+  if (memberTools[name]) {
+    rootLogger.writeToolsSnapshot(memberTools[name]);
+  }
+  activeSeqs[name] = rootLogger.nextSeq();
+
   try {
     const result = await delegateToWorker(name, message);
+    rootLogger.appendResponseLine(activeSeqs[name], { type: "worker_end", result });
     res.json(result);
   } catch (err) {
+    rootLogger.appendResponseLine(activeSeqs[name], { type: "worker_error", message: err.message });
     res.status(500).json({ error: err.message });
+  } finally {
+    activeSeqs[name] = null;
   }
 });
 
@@ -491,4 +619,5 @@ app.listen(port, () => {
   console.log(`Team agent wrapper listening on port ${port}`);
   console.log(`Workspace: ${workspaceDir}`);
   console.log(`Team: ${manifest.team_name}`);
+  console.log(`Logs: ${logsDir}/${instanceId}`);
 });

@@ -18,8 +18,8 @@ RUN npm init -y && npm install --ignore-scripts @anthropic-ai/sdk express
 COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
 
-# Work directory for code repos (bind-mounted at runtime)
-RUN mkdir -p /workspace
+# Work directory for code repos and logs (mounted at runtime)
+RUN mkdir -p /workspace /logs
 
 {{if .CustomContent}}{{.CustomContent}}{{end}}
 

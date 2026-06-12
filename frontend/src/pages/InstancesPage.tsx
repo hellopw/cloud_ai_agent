@@ -163,7 +163,10 @@ export default function InstancesPage() {
           </div>
           <div className="card-actions">
             {i.status === 'running' && (
-              <Link to={`/instances/${i.id}/chat`} className="btn btn-primary">Chat</Link>
+              <>
+                <Link to={`/instances/${i.id}/chat`} className="btn btn-primary">Chat</Link>
+                <Link to={`/instances/${i.id}/logs`} className="btn btn-ghost">Logs</Link>
+              </>
             )}
             <button onClick={() => handleDelete(i.id)} className="btn btn-danger">Stop</button>
           </div>

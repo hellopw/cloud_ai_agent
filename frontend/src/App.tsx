@@ -12,6 +12,7 @@ import TemplateEditPage from './pages/TemplateEditPage'
 import AgentsPage from './pages/AgentsPage'
 import InstancesPage from './pages/InstancesPage'
 import ChatPage from './pages/ChatPage'
+import InstanceLogsPage from './pages/InstanceLogsPage'
 import ResourcesPage from './pages/ResourcesPage'
 import ModelsPage from './pages/ModelsPage'
 import AgentTeamsPage from './pages/AgentTeamsPage'
@@ -70,6 +71,7 @@ function App() {
           <Route path="/agent-teams/:id" element={<AgentTeamEditPage />} />
           <Route path="/instances" element={<InstancesPage />} />
           <Route path="/instances/:id/chat" element={<ChatPage />} />
+          <Route path="/instances/:id/logs" element={<InstanceLogsPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/resources" element={<ResourcesPage />} />
         </Routes>

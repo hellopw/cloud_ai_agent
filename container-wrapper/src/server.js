@@ -6,12 +6,18 @@ import { readFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
+import { createLLMLogger } from "./llm-logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
 mkdirSync(workspaceDir, { recursive: true });
 
 const env = new NodeExecutionEnv({ cwd: workspaceDir });
+
+// LLM logger setup
+const logsDir = process.env.LOGS_DIR || "/logs";
+const instanceId = process.env.INSTANCE_ID || "unknown";
+const logger = createLLMLogger(logsDir, instanceId);
 
 // ---- Built-in tools ----
 
@@ -205,8 +211,6 @@ function setupAgent() {
 
   if (!model) {
     console.error(`Falling back to default model for ${provider}/${modelId}`);
-    // Use anthropic-messages for custom endpoints with API keys,
-    // openai-codex-responses for ChatGPT backend (JWT-based auth)
     const api = baseUrl ? "anthropic-messages" : "openai-codex-responses";
     model = {
       id: modelId,
@@ -238,50 +242,83 @@ function setupAgent() {
     },
   });
 
-  // Log available extensions and skills dirs
-  const skillsDir = resolve(process.env.SKILLS_DIR || "/app/pi-skills");
-  if (existsSync(skillsDir)) {
-    console.log(`Skills dir: ${skillsDir}`);
-  }
-  const promptsDir = resolve(process.env.PROMPTS_DIR || "/app/pi-prompts");
-  if (existsSync(promptsDir)) {
-    console.log(`Prompts dir: ${promptsDir}`);
-  }
-  const extensionsDir = resolve(process.env.EXTENSIONS_DIR || "/app/extensions");
-  if (existsSync(extensionsDir)) {
-    console.log(`Extensions dir: ${extensionsDir}`);
-  }
-
-  return agent;
+  return { agent, model };
 }
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-// ---- API call logging ----
+// ---- API call logging (fetch monkey-patch + file logging) ----
+let activeSeq = null;
+
 const _fetch = globalThis.fetch;
 globalThis.fetch = async (url, opts) => {
   const start = Date.now();
-  const method = opts?.method || 'GET';
-  const body = opts?.body ? (typeof opts.body === 'string' ? opts.body.substring(0, 500) : '[stream]') : '';
-  console.log(`[API] --> ${method} ${url} body=${body}`);
+  const method = opts?.method || "GET";
+
+  // Log request to file if we're in an active logging session
+  if (activeSeq) {
+    const bodyStr = opts?.body;
+    let parsedBody = "";
+    try {
+      parsedBody = bodyStr ? JSON.parse(typeof bodyStr === "string" ? bodyStr : "[stream]") : "";
+    } catch {
+      parsedBody = typeof bodyStr === "string" ? bodyStr.substring(0, 2000) : "[stream]";
+    }
+    logger.logRequest(activeSeq, {
+      method,
+      url,
+      body: parsedBody,
+    });
+  }
+
+  console.log(`[API] --> ${method} ${url} body=${typeof opts?.body === "string" ? opts.body.substring(0, 500) : "[stream]"}`);
+
   try {
     const resp = await _fetch(url, opts);
     const clone = resp.clone();
-    const text = await clone.text();
     const elapsed = Date.now() - start;
+
+    // Log response to file (read full SSE text for PI agent)
+    if (activeSeq) {
+      const text = await clone.text();
+      const isStream = resp.headers.get("content-type")?.includes("text/event-stream");
+      if (isStream) {
+        const lines = text.split("\n").filter(Boolean);
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              logger.appendResponseLine(activeSeq, data);
+            } catch {
+              logger.appendResponseLine(activeSeq, { raw: line });
+            }
+          }
+        }
+      }
+      logger.appendResponseLine(activeSeq, {
+        type: "http_response",
+        status: resp.status,
+        elapsed_ms: elapsed,
+        content_type: resp.headers.get("content-type"),
+      });
+    }
+
     console.log(`[API] <-- ${resp.status} ${elapsed}ms body=${text.substring(0, 2000)}`);
     return resp;
   } catch (e) {
+    if (activeSeq) {
+      logger.appendResponseLine(activeSeq, { type: "fetch_error", message: e.message });
+    }
     console.log(`[API] <-- ERROR ${Date.now() - start}ms ${e.message}`);
     throw e;
   }
 };
 
-let agent;
+let agentState;
 
 app.get("/status", (req, res) => {
-  res.json({ status: "running", ready: !!agent, provider: process.env.AGENT_PROVIDER || "openai-codex", model: process.env.AGENT_MODEL || "gpt-5.1-codex-max" });
+  res.json({ status: "running", ready: !!agentState, provider: process.env.AGENT_PROVIDER || "openai-codex", model: process.env.AGENT_MODEL || "gpt-5.1-codex-max" });
 });
 
 app.get("/health", (req, res) => {
@@ -294,9 +331,18 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "message required" });
   }
 
-  if (!agent) {
-    agent = setupAgent();
+  if (!agentState) {
+    agentState = setupAgent();
   }
+
+  // Init logging session and write snapshots
+  logger.newSession();
+  logger.writeToolsSnapshot(tools);
+  const skillsDir = process.env.SKILLS_DIR || "/app/pi-skills";
+  const promptsDir = process.env.PROMPTS_DIR || "/app/pi-prompts";
+  logger.writeSkillsSnapshot(skillsDir);
+  logger.writePromptsSnapshot(promptsDir);
+  activeSeq = logger.nextSeq();
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -307,30 +353,43 @@ app.post("/chat", async (req, res) => {
   }
 
   try {
-    agent.subscribe((event) => {
+    agentState.agent.subscribe((event) => {
       sendEvent(event.type, event);
     });
 
-    await agent.prompt(message);
+    await agentState.agent.prompt(message);
     sendEvent("agent_end", { stopReason: "end_turn" });
+    logger.appendResponseLine(activeSeq, { type: "agent_end", stopReason: "end_turn" });
   } catch (err) {
     sendEvent("error", { message: err.message });
+    logger.appendResponseLine(activeSeq, { type: "fatal_error", message: err.message, stack: err.stack });
   } finally {
+    activeSeq = null;
     res.end();
   }
 });
 
 app.post("/abort", (req, res) => {
-  if (agent) {
-    agent.abort();
+  if (agentState) {
+    agentState.agent.abort();
     res.json({ status: "aborted" });
   } else {
     res.json({ status: "no active agent" });
   }
 });
 
+// Write initial snapshots on startup
+const startupSkillsDir = process.env.SKILLS_DIR || "/app/pi-skills";
+const startupPromptsDir = process.env.PROMPTS_DIR || "/app/pi-prompts";
+if (startupSkillsDir || startupPromptsDir) {
+  logger.newSession();
+  logger.writeSkillsSnapshot(startupSkillsDir);
+  logger.writePromptsSnapshot(startupPromptsDir);
+}
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Agent wrapper listening on port ${port}`);
   console.log(`Workspace: ${workspaceDir}`);
+  console.log(`Logs: ${logsDir}/${instanceId}`);
 });

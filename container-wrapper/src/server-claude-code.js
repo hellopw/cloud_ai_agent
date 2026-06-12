@@ -1,13 +1,19 @@
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
-import * as fs from "fs";
+import { readFileSync, existsSync, mkdirSync } from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
+import { createLLMLogger } from "./llm-logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
-fs.mkdirSync(workspaceDir, { recursive: true });
+mkdirSync(workspaceDir, { recursive: true });
+
+// LLM logger setup
+const logsDir = process.env.LOGS_DIR || "/logs";
+const instanceId = process.env.INSTANCE_ID || "unknown";
+const logger = createLLMLogger(logsDir, instanceId);
 
 // ---- Built-in tools ----
 const tools = [
@@ -109,21 +115,23 @@ async function executeTool(name, input) {
     }
     case "read_file": {
       const p = input.path.startsWith("/") ? input.path : path.join(workspaceDir, input.path);
-      if (!fs.existsSync(p)) return `Error: file not found: ${p}`;
-      return fs.readFileSync(p, "utf-8");
+      if (!existsSync(p)) return `Error: file not found: ${p}`;
+      return readFileSync(p, "utf-8");
     }
     case "write_file": {
       const p = input.path.startsWith("/") ? input.path : path.join(workspaceDir, input.path);
+      const fs = await import("fs");
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, input.content, "utf-8");
       return "File written successfully.";
     }
     case "edit_file": {
       const p = input.path.startsWith("/") ? input.path : path.join(workspaceDir, input.path);
-      if (!fs.existsSync(p)) return `Error: file not found: ${p}`;
-      const content = fs.readFileSync(p, "utf-8");
+      if (!existsSync(p)) return `Error: file not found: ${p}`;
+      const content = readFileSync(p, "utf-8");
       if (!content.includes(input.old_string)) return "Error: old_string not found in file.";
       const newContent = content.replace(input.old_string, input.new_string);
+      const fs = await import("fs");
       fs.writeFileSync(p, newContent, "utf-8");
       return "File edited successfully.";
     }
@@ -145,6 +153,7 @@ async function executeTool(name, input) {
     case "list_files": {
       try {
         const listPath = input.path || workspaceDir;
+        const fs = await import("fs");
         const entries = fs.readdirSync(listPath, { withFileTypes: true });
         return entries.map(f => `${f.isDirectory() ? "d" : "-"} ${f.name} (${f.isFile() ? fs.statSync(path.join(listPath, f.name)).size : 0} bytes)`).join("\n") || "(empty)";
       } catch (e) {
@@ -167,26 +176,6 @@ async function executeTool(name, input) {
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-// ---- API call logging ----
-const _fetch = globalThis.fetch;
-globalThis.fetch = async (url, opts) => {
-  const start = Date.now();
-  const method = opts?.method || "GET";
-  const body = opts?.body ? (typeof opts.body === "string" ? opts.body.substring(0, 500) : "[stream]") : "";
-  console.log(`[API] --> ${method} ${url} body=${body}`);
-  try {
-    const resp = await _fetch(url, opts);
-    const clone = resp.clone();
-    const text = await clone.text();
-    const elapsed = Date.now() - start;
-    console.log(`[API] <-- ${resp.status} ${elapsed}ms body=${text.substring(0, 2000)}`);
-    return resp;
-  } catch (e) {
-    console.log(`[API] <-- ERROR ${Date.now() - start}ms ${e.message}`);
-    throw e;
-  }
-};
-
 app.get("/status", (req, res) => {
   const provider = process.env.AGENT_PROVIDER || "anthropic";
   const model = process.env.AGENT_MODEL || "claude-sonnet-4-20250514";
@@ -205,6 +194,7 @@ app.post("/chat", async (req, res) => {
 
   const apiKey = process.env.AGENT_API_KEY || "";
   const modelId = process.env.AGENT_MODEL || "claude-sonnet-4-20250514";
+  const provider = process.env.AGENT_PROVIDER || "anthropic";
   const baseUrl = process.env.AGENT_BASE_URL || undefined;
 
   const client = new Anthropic({ apiKey, baseURL: baseUrl });
@@ -218,6 +208,15 @@ app.post("/chat", async (req, res) => {
   }
 
   try {
+    // Init logging session and write snapshots
+    logger.newSession();
+    logger.writeToolsSnapshot(tools);
+
+    const skillsDir = process.env.SKILLS_DIR || "/app/skills";
+    const promptsDir = process.env.PROMPTS_DIR || "/app/prompts";
+    logger.writeSkillsSnapshot(skillsDir);
+    logger.writePromptsSnapshot(promptsDir);
+
     const messages = [{ role: "user", content: message }];
 
     let turnCount = 0;
@@ -226,31 +225,52 @@ app.post("/chat", async (req, res) => {
     while (turnCount < maxTurns) {
       turnCount++;
 
+      const seq = logger.nextSeq();
+      const requestPayload = {
+        provider,
+        model: modelId,
+        baseUrl: baseUrl || "https://api.anthropic.com",
+        system: "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.",
+        messages,
+        tools,
+        max_tokens: 16000,
+      };
+      logger.logRequest(seq, requestPayload);
+
       const stream = client.messages.stream({
         model: modelId,
         max_tokens: 16000,
-        system: "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.",
+        system: requestPayload.system,
         messages,
         tools,
       });
 
       let toolUseBlocks = [];
-      let currentThinking = "";
-      let currentText = "";
+      let streamError = null;
 
       for await (const event of stream) {
         switch (event.type) {
           case "message_start":
             sendEvent("message_start", event.message);
+            logger.appendResponseLine(seq, { type: event.type, message: event.message });
             break;
           case "content_block_start":
+            logger.appendResponseLine(seq, {
+              type: event.type,
+              index: event.index,
+              content_block: event.content_block,
+            });
             if (event.content_block.type === "tool_use") {
               toolUseBlocks.push({ id: event.content_block.id, name: event.content_block.name, input: "" });
             }
             break;
           case "content_block_delta":
+            logger.appendResponseLine(seq, {
+              type: event.type,
+              index: event.index,
+              delta: event.delta,
+            });
             if (event.delta.type === "thinking_delta") {
-              currentThinking += event.delta.thinking;
               sendEvent("message_update", {
                 assistantMessageEvent: {
                   type: "thinking_delta",
@@ -258,7 +278,6 @@ app.post("/chat", async (req, res) => {
                 },
               });
             } else if (event.delta.type === "text_delta") {
-              currentText += event.delta.text;
               sendEvent("message_update", {
                 assistantMessageEvent: {
                   type: "text_delta",
@@ -273,22 +292,38 @@ app.post("/chat", async (req, res) => {
             }
             break;
           case "content_block_stop":
+            logger.appendResponseLine(seq, { type: event.type, index: event.index });
             break;
           case "message_delta":
             sendEvent("message_update", { message_delta: event.delta });
+            logger.appendResponseLine(seq, { type: event.type, delta: event.delta });
             break;
           case "message_stop":
+            logger.appendResponseLine(seq, { type: event.type });
             break;
+          case "error":
+            streamError = event.error;
+            logger.appendResponseLine(seq, { type: "error", error: event.error });
+            break;
+          default:
+            logger.appendResponseLine(seq, event);
         }
       }
 
       const finalMessage = stream.finalMessage();
-      if (!finalMessage) break;
+      if (!finalMessage) {
+        logger.appendResponseLine(seq, { type: "end_turn", stop_reason: "no_final_message" });
+        break;
+      }
 
       // Check for tool use
       const toolUses = finalMessage.content.filter(c => c.type === "tool_use");
       if (toolUses.length === 0) {
-        // No more tools, agent is done
+        logger.appendResponseLine(seq, {
+          type: "end_turn",
+          stop_reason: "end_turn",
+          usage: finalMessage.usage,
+        });
         break;
       }
 
@@ -307,6 +342,13 @@ app.post("/chat", async (req, res) => {
         const result = await executeTool(tu.name, tu.input);
         sendEvent("tool_result", { toolCallId: tu.id, content: result });
 
+        logger.appendResponseLine(seq, {
+          type: "tool_exec_result",
+          tool_use_id: tu.id,
+          tool_name: tu.name,
+          content: result,
+        });
+
         toolResults.push({
           type: "tool_result",
           tool_use_id: tu.id,
@@ -319,6 +361,7 @@ app.post("/chat", async (req, res) => {
 
     sendEvent("agent_end", { stopReason: "end_turn" });
   } catch (err) {
+    logger.appendResponseLine("error", { type: "fatal_error", message: err.message, stack: err.stack });
     sendEvent("error", { message: err.message });
   } finally {
     res.end();
@@ -329,10 +372,20 @@ app.post("/abort", (req, res) => {
   res.json({ status: "no active agent to abort" });
 });
 
+// Write initial snapshots on startup
+const startupSkillsDir = process.env.SKILLS_DIR || "/app/skills";
+const startupPromptsDir = process.env.PROMPTS_DIR || "/app/prompts";
+if (startupSkillsDir || startupPromptsDir) {
+  logger.newSession();
+  logger.writeSkillsSnapshot(startupSkillsDir);
+  logger.writePromptsSnapshot(startupPromptsDir);
+}
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   const model = process.env.AGENT_MODEL || "claude-sonnet-4-20250514";
   console.log(`Claude Code wrapper listening on port ${port}`);
   console.log(`Workspace: ${workspaceDir}`);
   console.log(`Model: ${model}`);
+  console.log(`Logs: ${logsDir}/${instanceId}`);
 });
