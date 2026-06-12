@@ -10,31 +10,55 @@
 | 部署目录 | `/home/binwang/cloud_ai_agent/` |
 | 端口 | 29080（默认 8080 被 Tomcat 占用） |
 
-## 部署前检查
+## 数据库保护（必读）
 
-**关键**：上传前必须清理 `deploy/` 目录下的本地运行时产物，否则 SCP 会覆盖服务器数据：
+**部署只更新程序文件，绝不覆盖数据库。** 数据库路径：`data/cloud_ai_agent.db`
+
+### 上传前验证
+
+SCP 上传之前，必须确认本地 `deploy/` 目录**不包含** `data/` 子目录：
 
 ```powershell
-# 清理本地运行时产物（防止覆盖服务器数据）
-Remove-Item -Recurse -Force D:\Code\cloud_ai_agent\deploy\data -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force D:\Code\cloud_ai_agent\deploy\logs -ErrorAction SilentlyContinue
-Remove-Item -Force D:\Code\cloud_ai_agent\deploy\cloud-ai-agent.exe -ErrorAction SilentlyContinue
+# 应该返回 False（不存在）
+Test-Path D:\Code\cloud_ai_agent\deploy\data
+```
+
+如果存在，立即删除（本地运行时产生的残留文件）：
+```powershell
+Remove-Item -Recurse -Force D:\Code\cloud_ai_agent\deploy\data
+```
+
+### 为什么重要
+
+- `scp -r deploy/*` 会不加区分地上传 `deploy/` 下所有内容
+- 如果 `deploy/data/cloud_ai_agent.db` 存在（本地测试时后端自动生成），会上传到服务器**直接覆盖**服务器数据库
+- 服务器数据没有自动备份，覆盖后无法恢复
+
+### 部署前备份（可选）
+
+```bash
+ssh 152-binwang "cp /home/binwang/cloud_ai_agent/data/cloud_ai_agent.db /tmp/backup-$(date +%Y%m%d-%H%M%S).db"
 ```
 
 ## 部署步骤
 
-### 1. 本地构建
+### 1. 清理 + 构建
 
 在 Windows 本地执行：
 
 ```powershell
 cd D:\Code\cloud_ai_agent
 
-# 0. 清理上次的构建产物
-Remove-Item -Force ..\deploy\cloud-ai-agent -ErrorAction SilentlyContinue
+# === 清理 ===
+# 删除上次构建产物（防止旧文件混入）
+Remove-Item -Force deploy\cloud-ai-agent -ErrorAction SilentlyContinue
+# 删除本地运行时残留（关键：防止覆盖服务器数据库）
+Remove-Item -Recurse -Force deploy\data -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force deploy\logs -ErrorAction SilentlyContinue
+Remove-Item -Force deploy\cloud-ai-agent.exe -ErrorAction SilentlyContinue
 
+# === 构建 ===
 # 1. 编译 Go 二进制（交叉编译到 Linux）
-# Go build cache 可能因权限问题失败，设置 GOCACHE 到项目内目录
 cd backend
 $env:GOOS="linux"; $env:GOARCH="amd64"; $env:GOCACHE="D:\Code\cloud_ai_agent\.go-cache"
 go build -o ..\deploy\cloud-ai-agent .\cmd\server\
@@ -50,21 +74,28 @@ Copy-Item -Recurse dist ..\deploy\frontend
 # 4. 复制 container-wrapper 到 deploy/
 Remove-Item -Recurse -Force ..\deploy\container-wrapper -ErrorAction SilentlyContinue
 Copy-Item -Recurse ..\container-wrapper ..\deploy\container-wrapper
+
+# === 验证 ===
+# 确认 data/ 不在 deploy/ 中
+if (Test-Path ..\deploy\data) {
+    Write-Error "错误: deploy/data 仍然存在，停止部署！"
+    exit 1
+}
+Write-Host "验证通过: deploy/data 不存在，可以上传"
 ```
 
 ### 2. 上传到服务器
 
 ```powershell
-# 使用 SSH 别名上传
+# 先删除服务器上正在运行的二进制（否则 SCP 失败：文件被占用）
+ssh 152-binwang "rm -f /home/binwang/cloud_ai_agent/cloud-ai-agent"
+
+# 上传 deploy/ 内容到服务器
 scp -r D:\Code\cloud_ai_agent\deploy\* 152-binwang:/home/binwang/cloud_ai_agent/
+
+# 修复 start.sh 换行符（Windows 上传后必做）
+ssh 152-binwang "sed -i 's/\r$//' /home/binwang/cloud_ai_agent/start.sh"
 ```
-
-常见问题与处理：
-
-- **SCP 上传失败 `dest open ... Failure`**：服务器上旧的 `cloud-ai-agent` 二进制可能正在运行，文件被占用。先 SSH 到服务器删除旧二进制再上传：`ssh 152-binwang "rm -f /home/binwang/cloud_ai_agent/cloud-ai-agent"`
-- **SCP 认证失败**：确认 `~/.ssh/config` 中有 `152-binwang` Host 配置，且对应的 `IdentityFile` 密钥存在
-- **其他文件（frontend、container-wrapper 等）上传无此问题**：只有正在运行的二进制文件会因为被占用而写入失败
-- **数据覆盖风险**：如果本地 `deploy/data/` 目录下有数据库文件，SCP 上传会直接覆盖服务器上的生产数据库。务必在构建前清理（见上方「部署前检查」）
 
 ### 3. 服务器上启动
 
@@ -117,11 +148,17 @@ ssh 152-binwang "tail -20 /home/binwang/cloud_ai_agent/logs/server.log"
 
 **现象**：部署后所有实例、Agent 等数据消失，`/api/instances` 返回 `[]`
 
-**原因**：本地 `deploy/data/` 目录下有残留的空数据库文件，SCP 上传时覆盖了服务器数据库
+**原因**：本地 `deploy/data/cloud_ai_agent.db` 被 SCP 上传到服务器，覆盖了服务器数据库。
 
-**解决**：
-1. 每次构建前清理 `deploy/data/` 和 `deploy/logs/`
-2. 如有重要数据，部署前先备份：`ssh 152-binwang "cp /home/binwang/cloud_ai_agent/data/cloud_ai_agent.db /tmp/backup.db"`
+**预防**：
+1. 构建完成后务必执行上方「验证」步骤，确认 `deploy/data` 不存在
+2. 如果部署前想保留数据，先备份：`ssh 152-binwang "cp /home/binwang/cloud_ai_agent/data/cloud_ai_agent.db /tmp/backup.db"`
+
+**恢复**：如果本地有数据库备份，手动上传到服务器：
+```powershell
+scp <本地备份.db> 152-binwang:/home/binwang/cloud_ai_agent/data/cloud_ai_agent.db
+```
+然后重启服务。
 
 ### start.sh 换行符错误
 
