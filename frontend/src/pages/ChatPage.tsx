@@ -604,7 +604,9 @@ export default function ChatPage() {
           display: 'flex',
           alignItems: 'center',
           gap: 12,
-          background: 'var(--sidebar-bg)',
+          background: 'rgba(255,255,255,0.30)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
         }}
       >
         <Link to="/instances" className="btn btn-ghost" style={{ fontSize: 12 }}>
@@ -647,7 +649,7 @@ export default function ChatPage() {
                     : msg.role === 'system'
                       ? 'var(--bg)'
                       : 'var(--card-bg)',
-                color: msg.role === 'user' ? '#fff' : 'var(--text)',
+                color: msg.role === 'user' ? 'var(--btn-text)' : 'var(--text)',
                 border: msg.role !== 'user' ? '1px solid var(--border)' : 'none',
                 fontSize: 13,
                 lineHeight: 1.6,
@@ -707,7 +709,9 @@ export default function ChatPage() {
         style={{
           padding: '16px 24px',
           borderTop: '1px solid var(--border)',
-          background: 'var(--sidebar-bg)',
+          background: 'rgba(255,255,255,0.30)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
         }}
       >
         <div style={{ display: 'flex', gap: 10 }}>

@@ -1,4 +1,5 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
+import Icon from './components/Icon'
 import PromptsPage from './pages/PromptsPage'
 import PromptEditPage from './pages/PromptEditPage'
 import SkillsPage from './pages/SkillsPage'
@@ -17,19 +18,21 @@ import ModelsPage from './pages/ModelsPage'
 import AgentTeamsPage from './pages/AgentTeamsPage'
 import AgentTeamEditPage from './pages/AgentTeamEditPage'
 import AgentPage from './pages/AgentPage'
+import GlassUIDemoPage from './pages/GlassUIDemoPage'
 
 const navItems = [
-  { to: '/agent', label: 'Agent' },
-  { to: '/prompts', label: 'Prompts' },
-  { to: '/skills', label: 'Skills' },
-  { to: '/tools', label: 'Tools' },
-  { to: '/memories', label: 'Memories' },
-  { to: '/templates', label: 'Templates' },
-  { to: '/agents', label: 'Agents' },
-  { to: '/agent-teams', label: 'Agent Teams' },
-  { to: '/instances', label: 'Instances' },
-  { to: '/models', label: 'Models' },
-  { to: '/resources', label: 'Resources' },
+  { to: '/agent', label: 'Agent', icon: 'agent' as const },
+  { to: '/prompts', label: 'Prompts', icon: 'prompts' as const },
+  { to: '/skills', label: 'Skills', icon: 'skills' as const },
+  { to: '/tools', label: 'Tools', icon: 'tools' as const },
+  { to: '/memories', label: 'Memories', icon: 'memories' as const },
+  { to: '/templates', label: 'Templates', icon: 'templates' as const },
+  { to: '/agents', label: 'Agents', icon: 'agents' as const },
+  { to: '/agent-teams', label: 'Agent Teams', icon: 'teams' as const },
+  { to: '/instances', label: 'Instances', icon: 'instances' as const },
+  { to: '/models', label: 'Models', icon: 'models' as const },
+  { to: '/resources', label: 'Resources', icon: 'resources' as const },
+  { to: '/glass-demo', label: 'Glass UI', icon: 'palette' as const },
 ]
 
 function App() {
@@ -40,6 +43,7 @@ function App() {
         <nav>
           {navItems.map((item) => (
             <NavLink key={item.to} to={item.to} className={({ isActive }) => isActive ? 'nav-active' : ''}>
+              <Icon name={item.icon} size={16} />
               {item.label}
             </NavLink>
           ))}
@@ -72,6 +76,7 @@ function App() {
           <Route path="/instances/:id/chat" element={<ChatPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/resources" element={<ResourcesPage />} />
+          <Route path="/glass-demo" element={<GlassUIDemoPage />} />
         </Routes>
       </main>
     </div>
