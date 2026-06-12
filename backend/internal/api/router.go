@@ -77,6 +77,23 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
+	mux.HandleFunc("/api/memories", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET": h.listMemories(w, r)
+		case "POST": h.createMemory(w, r)
+		default: methodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/memories/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/memories/")
+		switch r.Method {
+		case "GET": h.getMemory(w, r, id)
+		case "PUT": h.updateMemory(w, r, id)
+		case "DELETE": h.deleteMemory(w, r, id)
+		default: methodNotAllowed(w)
+		}
+	})
+
 	mux.HandleFunc("/api/templates", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET": h.listTemplates(w, r)

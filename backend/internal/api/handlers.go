@@ -495,6 +495,69 @@ func (h *Handler) deleteResource(w http.ResponseWriter, r *http.Request, id stri
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
+// --- Memories ---
+
+func (h *Handler) listMemories(w http.ResponseWriter, r *http.Request) {
+	memories, err := h.store.ListMemories()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, memories)
+}
+
+func (h *Handler) getMemory(w http.ResponseWriter, r *http.Request, id string) {
+	m, err := h.store.GetMemory(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if m == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (h *Handler) createMemory(w http.ResponseWriter, r *http.Request) {
+	var m model.Memory
+	if err := decodeJSON(r, &m); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateMemory(&m); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, m)
+}
+
+func (h *Handler) updateMemory(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetMemory(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var m model.Memory
+	if err := decodeJSON(r, &m); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	m.ID = existing.ID
+	if err := h.store.UpdateMemory(&m); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (h *Handler) deleteMemory(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteMemory(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
 
 
 // --- Agent Teams ---
