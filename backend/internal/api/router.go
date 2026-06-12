@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -163,12 +164,16 @@ func NewRouter(h *Handler) http.Handler {
 		}
 		if strings.HasSuffix(path, "/chat-http") {
 			id := strings.TrimSuffix(path, "/chat-http")
-			proxy.HandleChatHTTP("localhost", h.getInstancePort(id))(w, r)
+			port := h.getInstancePort(id)
+			log.Printf("router: chat-http id=%s port=%d", id, port)
+			proxy.HandleChatHTTP("localhost", port)(w, r)
 			return
 		}
 		if strings.HasSuffix(path, "/chat") {
 			id := strings.TrimSuffix(path, "/chat")
-			proxy.HandleChat("localhost", h.getInstancePort(id))(w, r)
+			port := h.getInstancePort(id)
+			log.Printf("router: chat id=%s port=%d", id, port)
+			proxy.HandleChat("localhost", port)(w, r)
 			return
 		}
 		if strings.HasSuffix(path, "/messages") {
@@ -195,6 +200,11 @@ func NewRouter(h *Handler) http.Handler {
 				}
 			}
 			writeError(w, http.StatusBadRequest, "invalid llm-logs path")
+			return
+		}
+		if strings.HasSuffix(path, "/config") {
+			id := strings.TrimSuffix(path, "/config")
+			if r.Method == "GET" { h.getInstanceConfig(w, r, id) } else { methodNotAllowed(w) }
 			return
 		}
 		switch r.Method {
