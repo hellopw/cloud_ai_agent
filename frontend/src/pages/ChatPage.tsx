@@ -37,7 +37,6 @@ export default function ChatPage() {
   const [instanceInfo, setInstanceInfo] = useState<{ host_port: number; status: string }>({ host_port: 0, status: '' })
   const [instanceConfig, setInstanceConfig] = useState<InstanceConfig | null>(null)
   const [configExpanded, setConfigExpanded] = useState(false)
-  const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const streamingBlocksRef = useRef<ContentBlock[]>([])
   const messageCommittedRef = useRef(false)
@@ -83,15 +82,6 @@ export default function ChatPage() {
       .then(r => r.json())
       .then(data => setInstanceInfo(data))
       .catch(() => {})
-  }, [id])
-
-  useEffect(() => {
-    if (id) {
-      fetch('/api/instances/' + id + '/status')
-        .then(r => r.json())
-        .then(data => setContainerInfo(data))
-        .catch(() => {})
-    }
   }, [id])
 
   useEffect(() => {
@@ -332,46 +322,23 @@ export default function ChatPage() {
     }
   }
 
-  // ── WebSocket connection ──
+  // ── connection check via health endpoint ──
 
   useEffect(() => {
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let ws: WebSocket | null = null
-
-    const connect = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const url = `${protocol}//${window.location.host}/api/instances/${id}/chat`
-      ws = new WebSocket(url)
-      wsRef.current = ws
-
-      ws.onopen = () => {
-        console.log('[ChatPage] WS connected')
-        setConnected(true)
-      }
-      ws.onclose = () => {
-        console.log('[ChatPage] WS closed')
-        setConnected(false)
-        reconnectTimer = setTimeout(connect, 3000)
-      }
-      ws.onerror = (err) => {
-        console.error('[ChatPage] WS error:', err)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data)
-          processEvent(msg.type, msg.data)
-        } catch (err) {
-          console.error('[ChatPage] WS message error:', err, event.data?.substring?.(0, 200))
-        }
-      }
+    if (!id) return
+    let timer: ReturnType<typeof setInterval> | null = null
+    const check = () => {
+      fetch('/api/instances/' + id + '/status')
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(data => {
+          setConnected(data.status === 'running' || data.status === 'ok')
+          setContainerInfo(data)
+        })
+        .catch(() => setConnected(false))
     }
-    connect()
-    return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      if (ws) ws.close()
-      wsRef.current = null
-    }
+    check()
+    timer = setInterval(check, 10000)
+    return () => { if (timer) clearInterval(timer) }
   }, [id])
 
   // ── auto-scroll ──
@@ -468,27 +435,11 @@ export default function ChatPage() {
       return
     }
 
-    const wsState = wsRef.current?.readyState
-    console.log('[ChatPage] handleSend:', { trimmed, wsState, isOpen: wsState === WebSocket.OPEN })
     messageCommittedRef.current = false
-    if (wsState !== WebSocket.OPEN) {
-      setMessages(prev => [...prev, { role: 'user', content: [{ type: 'text', text: trimmed }] }])
-      saveMessage('user', [{ type: 'text', text: trimmed }])
-      setInput('')
-      sendViaHttp(trimmed)
-      return
-    }
-
-    console.log('[ChatPage] handleSend: sending via WebSocket')
     setMessages(prev => [...prev, { role: 'user', content: [{ type: 'text', text: trimmed }] }])
     saveMessage('user', [{ type: 'text', text: trimmed }])
-    try {
-      wsRef.current!.send(JSON.stringify({ type: 'chat', message: trimmed }))
-      setInput('')
-    } catch {
-      sendViaHttp(trimmed)
-      setInput('')
-    }
+    setInput('')
+    sendViaHttp(trimmed)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

@@ -54,16 +54,37 @@ func HandleChatHTTP(containerHost string, containerPort int) http.HandlerFunc {
 		flusher, canFlush := w.(http.Flusher)
 		reader := bufio.NewReader(resp.Body)
 
+		var pendingLines []string
 		for {
 			line, err := reader.ReadString('\n')
-			if err != nil {
+			if err != nil && line == "" {
 				break
 			}
 			line = strings.TrimSpace(line)
+
 			if line == "" {
+				// End of SSE event — flush accumulated lines as one event
+				if len(pendingLines) > 0 {
+					for _, l := range pendingLines {
+						fmt.Fprintf(w, "%s\n", l)
+					}
+					fmt.Fprintf(w, "\n")
+					if canFlush {
+						flusher.Flush()
+					}
+					pendingLines = pendingLines[:0]
+				}
 				continue
 			}
-			fmt.Fprintf(w, "%s\n\n", line)
+
+			pendingLines = append(pendingLines, line)
+		}
+		// Flush any remaining lines
+		if len(pendingLines) > 0 {
+			for _, l := range pendingLines {
+				fmt.Fprintf(w, "%s\n", l)
+			}
+			fmt.Fprintf(w, "\n")
 			if canFlush {
 				flusher.Flush()
 			}

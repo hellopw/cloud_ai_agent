@@ -54,17 +54,23 @@ func HandleChat(containerHost string, containerPort int) http.HandlerFunc {
 			return
 		}
 		defer conn.Close()
+		log.Printf("ws: connection established from %s for %s:%d", r.RemoteAddr, containerHost, containerPort)
 
 		for {
 			_, msgBytes, err := conn.ReadMessage()
 			if err != nil {
+				log.Printf("ws: read error (client likely disconnected): %v", err)
 				break
 			}
 
+			log.Printf("ws: raw message received: %s", string(msgBytes)[:min(len(msgBytes), 200)])
 			var msg ChatMessage
 			if err := json.Unmarshal(msgBytes, &msg); err != nil {
+				log.Printf("ws: unmarshal error: %v", err)
 				continue
 			}
+
+			log.Printf("ws: parsed message type=%s message_len=%d", msg.Type, len(msg.Message))
 
 			if msg.Type == "chat" {
 				log.Printf("ws: received chat message, proxying to %s/chat", containerURL)
