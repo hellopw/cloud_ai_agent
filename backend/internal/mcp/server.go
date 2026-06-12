@@ -317,7 +317,7 @@ func handleStartInstance(d *deps) server.ToolHandlerFunc {
 		if d.agentSvc == nil {
 			return errorResult("agent service not available"), nil
 		}
-		instance, err := d.agentSvc.StartInstance(ctx, agentID)
+		instance, err := d.agentSvc.StartInstance(ctx, agentID, "")
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}

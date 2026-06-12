@@ -3,11 +3,13 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 
 	"cloud_ai_agent/internal/model"
+	"github.com/google/uuid"
 )
 
 // --- Prompts ---
@@ -365,6 +367,10 @@ func (h *Handler) getBuildLog(w http.ResponseWriter, r *http.Request, id string)
 	if os.Getenv("PROJECT_ROOT") != "" {
 		logPath = filepath.Join(os.Getenv("PROJECT_ROOT"), "builds", id, "build.log")
 	}
+	// Fallback: try current directory (binary runs from project root on deployed server)
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		logPath = filepath.Join(".", "builds", id, "build.log")
+	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "build log not found")
@@ -495,6 +501,69 @@ func (h *Handler) deleteResource(w http.ResponseWriter, r *http.Request, id stri
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
+// --- Memories ---
+
+func (h *Handler) listMemories(w http.ResponseWriter, r *http.Request) {
+	memories, err := h.store.ListMemories()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, memories)
+}
+
+func (h *Handler) getMemory(w http.ResponseWriter, r *http.Request, id string) {
+	m, err := h.store.GetMemory(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if m == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (h *Handler) createMemory(w http.ResponseWriter, r *http.Request) {
+	var m model.Memory
+	if err := decodeJSON(r, &m); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.store.CreateMemory(&m); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, m)
+}
+
+func (h *Handler) updateMemory(w http.ResponseWriter, r *http.Request, id string) {
+	existing, err := h.store.GetMemory(id)
+	if err != nil || existing == nil {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	var m model.Memory
+	if err := decodeJSON(r, &m); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	m.ID = existing.ID
+	if err := h.store.UpdateMemory(&m); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, m)
+}
+
+func (h *Handler) deleteMemory(w http.ResponseWriter, r *http.Request, id string) {
+	if err := h.store.DeleteMemory(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
+}
 
 
 // --- Agent Teams ---
@@ -575,6 +644,10 @@ func (h *Handler) getTeamBuildLog(w http.ResponseWriter, r *http.Request, id str
 	logPath := filepath.Join("..", "builds", id, "build.log")
 	if os.Getenv("PROJECT_ROOT") != "" {
 		logPath = filepath.Join(os.Getenv("PROJECT_ROOT"), "builds", id, "build.log")
+	}
+	// Fallback: try current directory (binary runs from project root on deployed server)
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		logPath = filepath.Join(".", "builds", id, "build.log")
 	}
 	data, err := os.ReadFile(logPath)
 	if err != nil {
@@ -681,4 +754,35 @@ func (h *Handler) deleteProviderConfig(w http.ResponseWriter, r *http.Request, i
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// --- Chat Messages ---
+
+func (h *Handler) listChatMessages(w http.ResponseWriter, r *http.Request, instanceID string) {
+	msgs, err := h.store.ListChatMessages(instanceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if msgs == nil {
+		msgs = []model.ChatMessage{}
+	}
+	writeJSON(w, http.StatusOK, msgs)
+}
+
+func (h *Handler) createChatMessage(w http.ResponseWriter, r *http.Request, instanceID string) {
+	var msg model.ChatMessage
+	if err := decodeJSON(r, &msg); err != nil {
+		log.Printf("[chat-msg] decode error for instance %s: %v", instanceID, err)
+		writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	log.Printf("[chat-msg] saving role=%s content_len=%d for instance %s", msg.Role, len(msg.Content), instanceID)
+	msg.ID = uuid.New().String()
+	msg.InstanceID = instanceID
+	if err := h.store.CreateChatMessage(&msg); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, msg)
 }

@@ -218,7 +218,7 @@ export default function AgentsPage() {
         <label>Template</label>
         <select value={f.template_id} onChange={(e: any) => setF({ ...f, template_id: e.target.value })} required>
           <option value="">Select template...</option>
-          {templates.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {templates.map((t: any) => <option key={t.id} value={t.id}>{t.name} [{t.agent_type || 'pi'}]</option>)}
         </select>
       </div>
 

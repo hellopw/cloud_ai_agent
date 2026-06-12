@@ -30,6 +30,42 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const streamingBlocksRef = useRef<ContentBlock[]>([])
   const messageCommittedRef = useRef(false)
+  const idRef = useRef(id)
+
+  // Keep idRef in sync so closures always have the correct instance ID
+  idRef.current = id
+
+  // Persist a chat message to the backend
+  const saveMessage = (role: string, content: ContentBlock[]) => {
+    const instanceId = idRef.current
+    if (!instanceId || content.length === 0) return
+    fetch('/api/instances/' + instanceId + '/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, content: JSON.stringify(content) }),
+    }).then(r => {
+      if (!r.ok) console.error('[ChatPage] saveMessage failed', r.status)
+    }).catch(e => console.error('[ChatPage] saveMessage error', e))
+  }
+
+  // Load persisted messages on mount
+  useEffect(() => {
+    if (!id) return
+    fetch('/api/instances/' + id + '/messages')
+      .then(r => r.json())
+      .then((data: any[]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          const msgs: Message[] = data.map((m: any) => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? JSON.parse(m.content)
+              : Array.isArray(m.content) ? m.content
+              : [{ type: 'text', text: String(m.content || '') }],
+          }))
+          setMessages(msgs)
+        }
+      })
+      .catch(() => {})
+  }, [id])
 
   useEffect(() => {
     fetch('/api/instances/' + id)
@@ -165,6 +201,7 @@ export default function ChatPage() {
             setMessages(msgs => { const copy = [...msgs]; copy[copy.length - 1] = { role: 'assistant', content: blocks }; return copy })
           } else {
             setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+            saveMessage('assistant', blocks)
             messageCommittedRef.current = true
           }
         } else if (!messageCommittedRef.current && data?.messages && Array.isArray(data.messages)) {
@@ -190,6 +227,7 @@ export default function ChatPage() {
             }
             if (blocks.length > 0) {
               setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+              saveMessage('assistant', blocks)
               messageCommittedRef.current = true
             }
           }
@@ -212,6 +250,7 @@ export default function ChatPage() {
             setMessages(msgs => { const copy = [...msgs]; copy[copy.length - 1] = { role: 'assistant', content: blocks }; return copy })
           } else {
             setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+            saveMessage('assistant', blocks)
           }
           messageCommittedRef.current = true
         } else if (data?.message?.content && Array.isArray(data.message.content) && data.message.content.length > 0 && data.message.role !== 'user') {
@@ -237,6 +276,7 @@ export default function ChatPage() {
               setMessages(msgs => { const copy = [...msgs]; copy[copy.length - 1] = { role: 'assistant', content: blocks }; return copy })
             } else {
               setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+              saveMessage('assistant', blocks)
             }
             messageCommittedRef.current = true
           }
@@ -370,6 +410,7 @@ export default function ChatPage() {
       // Safety net: if we still have streaming blocks, commit them
       if (streamingBlocksRef.current.length > 0 && !messageCommittedRef.current) {
         setMessages(msgs => [...msgs, { role: 'assistant', content: [...streamingBlocksRef.current] }])
+        saveMessage('assistant', [...streamingBlocksRef.current])
         messageCommittedRef.current = true
       }
       streamingBlocksRef.current = []
@@ -401,12 +442,15 @@ export default function ChatPage() {
     messageCommittedRef.current = false
     if (wsState !== WebSocket.OPEN) {
       setMessages(prev => [...prev, { role: 'user', content: [{ type: 'text', text: trimmed }] }])
+      saveMessage('user', [{ type: 'text', text: trimmed }])
       setInput('')
       sendViaHttp(trimmed)
       return
     }
 
+    console.log('[ChatPage] handleSend: sending via WebSocket')
     setMessages(prev => [...prev, { role: 'user', content: [{ type: 'text', text: trimmed }] }])
+    saveMessage('user', [{ type: 'text', text: trimmed }])
     try {
       wsRef.current!.send(JSON.stringify({ type: 'chat', message: trimmed }))
       setInput('')
@@ -429,7 +473,9 @@ export default function ChatPage() {
     } catch { /* ignore */ }
     // Commit any partial streaming content as a message
     if (streamingBlocksRef.current.length > 0) {
-      setMessages(msgs => [...msgs, { role: 'assistant', content: [...streamingBlocksRef.current] }])
+      const blocks = [...streamingBlocksRef.current]
+      setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+      saveMessage('assistant', blocks)
     }
     streamingBlocksRef.current = []
     setStreamingBlocks([])

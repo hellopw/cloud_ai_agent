@@ -33,6 +33,9 @@ func NewAgentService(s *store.Store) *AgentService {
 			projectRoot = "."
 		}
 	}
+	// Configure codegen templates dir relative to project root
+	codegen.TemplatesDir = filepath.Join(projectRoot, "container-wrapper", "dockerfiles")
+
 	return &AgentService{
 		store:       s,
 		docker:      dockersvc.NewService(filepath.Join(projectRoot, "builds")),

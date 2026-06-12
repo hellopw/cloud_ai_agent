@@ -77,6 +77,23 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
+	mux.HandleFunc("/api/memories", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET": h.listMemories(w, r)
+		case "POST": h.createMemory(w, r)
+		default: methodNotAllowed(w)
+		}
+	})
+	mux.HandleFunc("/api/memories/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/memories/")
+		switch r.Method {
+		case "GET": h.getMemory(w, r, id)
+		case "PUT": h.updateMemory(w, r, id)
+		case "DELETE": h.deleteMemory(w, r, id)
+		default: methodNotAllowed(w)
+		}
+	})
+
 	mux.HandleFunc("/api/templates", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET": h.listTemplates(w, r)
@@ -154,6 +171,15 @@ func NewRouter(h *Handler) http.Handler {
 			proxy.HandleChat("localhost", h.getInstancePort(id))(w, r)
 			return
 		}
+		if strings.HasSuffix(path, "/messages") {
+			id := strings.TrimSuffix(path, "/messages")
+			switch r.Method {
+			case "GET": h.listChatMessages(w, r, id)
+			case "POST": h.createChatMessage(w, r, id)
+			default: methodNotAllowed(w)
+			}
+			return
+		}
 		switch r.Method {
 		case "GET": h.getInstance(w, r, path)
 		case "DELETE": h.deleteInstance(w, r, path)
@@ -161,7 +187,7 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
-		mux.HandleFunc("/api/provider-configs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/provider-configs", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case "GET": h.listProviderConfigs(w, r)
 		case "POST": h.createProviderConfig(w, r)
@@ -210,7 +236,7 @@ func NewRouter(h *Handler) http.Handler {
 		}
 	})
 
-mux.HandleFunc("/api/health", h.health)
+	mux.HandleFunc("/api/health", h.health)
 
 	mux.HandleFunc("/api/resources", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

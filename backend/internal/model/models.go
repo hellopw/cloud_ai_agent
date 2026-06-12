@@ -30,6 +30,16 @@ type Tool struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+type Memory struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Content     string    `json:"content"`
+	Source      string    `json:"source"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type Template struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`
@@ -101,6 +111,15 @@ type Instance struct {
 	ErrorMsg    string    `json:"error_msg,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type ChatMessage struct {
+	ID         string    `json:"id"`
+	InstanceID string    `json:"instance_id"`
+	Role       string    `json:"role"`
+	Content    string    `json:"content"`
+	ToolCall   string    `json:"tool_call,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Resource struct {
