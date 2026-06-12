@@ -17,6 +17,7 @@ RUN npm init -y && npm install --ignore-scripts @anthropic-ai/sdk express
 # Copy HTTP wrapper
 COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
+{{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
 
 # Work directory for code repos and logs (mounted at runtime)
 RUN mkdir -p /workspace /logs

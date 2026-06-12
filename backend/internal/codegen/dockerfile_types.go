@@ -20,6 +20,9 @@ func GenerateDockerfileByAgentType(agentType string, data *DockerfileData) (stri
 	if data.McpClient == "" {
 		data.McpClient = "mcp-client.js"
 	}
+	if data.LLMLogger == "" {
+		data.LLMLogger = "llm-logger.js"
+	}
 	if data.SkillsDir == "" {
 		data.SkillsDir = "pi-skills"
 	}
@@ -71,6 +74,7 @@ RUN npm init -y && npm install --ignore-scripts @earendil-works/pi-agent-core @e
 # Copy HTTP wrapper
 COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
+{{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
 RUN mkdir -p /workspace /logs
@@ -101,6 +105,7 @@ RUN npm init -y && npm install --ignore-scripts @anthropic-ai/sdk express
 # Copy HTTP wrapper
 COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
+{{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
 RUN mkdir -p /workspace /logs
@@ -131,6 +136,7 @@ RUN npm init -y && npm install --ignore-scripts @modelcontextprotocol/sdk openai
 # Copy HTTP wrapper
 COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
+{{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
 RUN mkdir -p /workspace /logs
@@ -159,6 +165,7 @@ COPY team-manifest.json ./
 # Copy team wrapper as server.js
 COPY team-server.js ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
+{{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
 
 # Copy each agent's directory
 {{range .AgentDirs}}COPY {{.}}/ ./{{.}}/

@@ -27,6 +27,7 @@ type DockerfileData struct {
 	ExtensionsDir string
 	WrapperScript string
 	McpClient     string
+	LLMLogger     string
 	ExposePort    int
 	CustomContent string
 }
@@ -87,6 +88,9 @@ func GenerateDockerfile(data *DockerfileData) (string, error) {
 	}
 	if data.McpClient == "" {
 		data.McpClient = "mcp-client.js"
+	}
+	if data.LLMLogger == "" {
+		data.LLMLogger = "llm-logger.js"
 	}
 	if data.SkillsDir == "" {
 		data.SkillsDir = "pi-skills"

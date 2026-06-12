@@ -15,6 +15,7 @@ COPY team-manifest.json ./
 # Copy team wrapper as server.js
 COPY team-server.js ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
+{{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
 
 # Copy each agent's directory
 {{range .AgentDirs}}COPY {{.}}/ ./{{.}}/

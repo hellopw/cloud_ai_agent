@@ -10,6 +10,7 @@ type TeamDockerfileData struct {
 	TeamPromptsDir string
 	TeamSkillsDir  string
 	McpClient      string
+	LLMLogger      string
 	ExposePort     int
 	CustomContent  string
 }
@@ -17,6 +18,9 @@ type TeamDockerfileData struct {
 func GenerateTeamDockerfile(data *TeamDockerfileData) (string, error) {
 	if data.McpClient == "" {
 		data.McpClient = "mcp-client.js"
+	}
+	if data.LLMLogger == "" {
+		data.LLMLogger = "llm-logger.js"
 	}
 	if data.ExposePort == 0 {
 		data.ExposePort = 3000

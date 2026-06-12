@@ -120,6 +120,14 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 			return err
 		}
 	}
+	// Copy LLM logger to build context root
+	llmLoggerSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "llm-logger.js")
+	if llmLoggerData, err := os.ReadFile(llmLoggerSrc); err == nil {
+		if err := os.WriteFile(filepath.Join(buildDir, "llm-logger.js"), llmLoggerData, 0644); err != nil {
+			svc.store.UpdateAgentStatus(agentID, "failed", "", err.Error())
+			return err
+		}
+	}
 
 	// Generate tool extensions
 	if err := svc.writeToolExtensions(buildDir, tmpl.ToolIDs); err != nil {
@@ -352,6 +360,11 @@ func (svc *AgentService) BuildAgentTeam(ctx context.Context, teamID string) erro
 	mcpClientSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "mcp-client.js")
 	if mcpData, err := os.ReadFile(mcpClientSrc); err == nil {
 		os.WriteFile(filepath.Join(buildDir, "mcp-client.js"), mcpData, 0644)
+	}
+	// Copy LLM logger
+	llmLoggerSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "llm-logger.js")
+	if llmLoggerData, err := os.ReadFile(llmLoggerSrc); err == nil {
+		os.WriteFile(filepath.Join(buildDir, "llm-logger.js"), llmLoggerData, 0644)
 	}
 
 	// Build manifest with member configs
