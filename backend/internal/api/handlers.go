@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"cloud_ai_agent/internal/model"
+	"cloud_ai_agent/internal/codegen"
 	"github.com/google/uuid"
 )
 
@@ -222,6 +223,9 @@ func (h *Handler) listTemplates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	for i := range templates {
+		fillEffectiveDockerfile(&templates[i])
+	}
 	writeJSON(w, http.StatusOK, templates)
 }
 
@@ -235,6 +239,7 @@ func (h *Handler) getTemplate(w http.ResponseWriter, r *http.Request, id string)
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	fillEffectiveDockerfile(t)
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -884,10 +889,7 @@ func (h *Handler) getLLMLogDir(instanceID string) (string, error) {
 	if err != nil || inst == nil {
 		return "", fmt.Errorf("instance not found")
 	}
-	projectRoot := os.Getenv("PROJECT_ROOT")
-	if projectRoot == "" {
-		projectRoot = ".."
-	}
+	projectRoot := h.agentSvc.ProjectRoot()
 	targetID := inst.AgentID
 	if targetID == "" {
 		targetID = inst.TeamID
@@ -997,4 +999,15 @@ func (h *Handler) getLLMLogFile(w http.ResponseWriter, r *http.Request, instance
 
 	w.Header().Set("Content-Type", contentType)
 	w.Write(data)
+}
+
+func fillEffectiveDockerfile(t *model.Template) {
+	if t.DockerfileContent != "" {
+		t.EffectiveDockerfile = t.DockerfileContent
+		return
+	}
+	df, err := codegen.GenerateDockerfileByAgentType(t.AgentType, &codegen.DockerfileData{})
+	if err == nil && df != "" {
+		t.EffectiveDockerfile = df
+	}
 }

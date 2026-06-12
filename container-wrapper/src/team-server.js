@@ -205,7 +205,7 @@ function startMcpDiscoveryForMember(memberName) {
     console.log(`No extensions.json for member "${memberName}" at ${extPath}`);
     mcpToolsCache[memberName] = [];
     mcpConfigCache[memberName] = {};
-    return;
+    return Promise.resolve();
   }
   const extConfigs = JSON.parse(readFileSync(extPath, "utf-8"));
   console.log(`[${memberName}] Starting MCP discovery for ${extConfigs.length} extension configs`);
@@ -217,9 +217,9 @@ function startMcpDiscoveryForMember(memberName) {
   mcpToolsCache[memberName] = memberTools;
   mcpConfigCache[memberName] = memberConfigs;
 
-  for (const cfg of mcpConfigs) {
+  const discoveryTasks = mcpConfigs.map(cfg => {
     const h = cfg.handler;
-    listMcpTools({
+    return listMcpTools({
       transport: h.transport || "stdio",
       command: h.command,
       args: h.args || [],
@@ -259,7 +259,9 @@ function startMcpDiscoveryForMember(memberName) {
       .catch(err => {
         console.error(`[${memberName}] MCP "${cfg.name}": discovery failed - ${err.message || err}`);
       });
-  }
+  });
+
+  return Promise.allSettled(discoveryTasks);
 }
 
 // ---- Agent setup per member ----
@@ -523,31 +525,28 @@ function getLeaderAgent() {
   return leaderAgent;
 }
 
-// Start MCP discovery for all members (non-blocking)
-for (const member of manifest.members) {
-  startMcpDiscoveryForMember(member.name);
-}
+  const discoveryPromises = manifest.members.map(m => startMcpDiscoveryForMember(m.name));
+  Promise.allSettled(discoveryPromises).then(() => {
+    // Initialize workers after MCP discovery completes
+    for (const member of manifest.members) {
+      if (member.role !== "leader") {
+        const mcpTools = mcpToolsCache[member.name] || [];
+        const result = setupAgent(memberConfigs[member.name], mcpTools);
+        agents[member.name] = result.agent;
+        memberModels[member.name] = result.model;
+        memberTools[member.name] = result.tools;
+        console.log(`Worker agent "${member.name}" initialized with ${mcpTools.length} MCP tools`);
 
-// Initialize workers eagerly
-for (const member of manifest.members) {
-  if (member.role !== "leader") {
-    const mcpTools = mcpToolsCache[member.name] || [];
-    const result = setupAgent(memberConfigs[member.name], mcpTools);
-    agents[member.name] = result.agent;
-    memberModels[member.name] = result.model;
-    memberTools[member.name] = result.tools;
-    console.log(`Worker agent "${member.name}" initialized with ${mcpTools.length} MCP tools`);
-
-    // Write per-agent snapshots on startup
-    rootLogger.newSession(member.name);
-    rootLogger.writeToolsSnapshot(result.tools);
-    const agentSkillsDir = join("/app/agents", member.name, "pi-skills");
-    const agentPromptsDir = join("/app/agents", member.name, "pi-prompts");
-    rootLogger.writeSkillsSnapshot(agentSkillsDir);
-    rootLogger.writePromptsSnapshot(agentPromptsDir);
-  }
-}
-
+        // Write per-agent snapshots on startup
+        rootLogger.newSession(member.name);
+        rootLogger.writeToolsSnapshot(result.tools);
+        const agentSkillsDir = join("/app/agents", member.name, "pi-skills");
+        const agentPromptsDir = join("/app/agents", member.name, "pi-prompts");
+        rootLogger.writeSkillsSnapshot(agentSkillsDir);
+        rootLogger.writePromptsSnapshot(agentPromptsDir);
+      }
+    }
+  });
 // Also write team-level snapshots
 rootLogger.newSession("team");
 const teamSkillsDir = process.env.SKILLS_DIR || "/app/pi-skills";

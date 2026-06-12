@@ -39,7 +39,7 @@ export default function TemplatesPage() {
             </button>
             {expandedDf === t.id && (
               <pre style={{ marginTop: 8, maxHeight: 300, overflow: "auto", fontSize: 12 }}>
-                {t.dockerfile_content || "(empty)"}
+                {t.effective_dockerfile || "(empty)"}
               </pre>
             )}
           </div>

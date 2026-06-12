@@ -21,15 +21,16 @@ func init() {
 }
 
 type DockerfileData struct {
-	NodeVersion   string
-	SkillsDir     string
-	PromptsDir    string
-	ExtensionsDir string
-	WrapperScript string
-	McpClient     string
-	LLMLogger     string
-	ExposePort    int
-	CustomContent string
+	NodeVersion      string
+	SkillsDir        string
+	PromptsDir       string
+	ExtensionsDir    string
+	WrapperScript    string
+	McpClient        string
+	LLMLogger        string
+	ExposePort       int
+	CustomContent    string
+	ExtraNpmPackages []string // MCP server npm packages to install at build time
 }
 
 // loadTemplate reads a Dockerfile template from the configured TemplatesDir.

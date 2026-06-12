@@ -35,6 +35,7 @@ test_clone*/
 
 # Build artifacts
 backend/cloud-ai-agent
+backend/cloud_ai_agent
 backend/vendor/
 frontend/tsconfig.tsbuildinfo
 Dockerfile.final

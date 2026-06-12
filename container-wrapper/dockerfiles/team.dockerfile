@@ -10,7 +10,7 @@ RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy 
 RUN apk add --no-cache git
 
 # Install pi packages
-RUN npm init -y && npm install --ignore-scripts @earendil-works/pi-agent-core @earendil-works/pi-ai express
+RUN npm init -y && npm install --ignore-scripts @earendil-works/pi-agent-core @earendil-works/pi-ai express{{range .ExtraNpmPackages}} {{.}}{{end}}
 
 # Copy team manifest
 COPY team-manifest.json ./

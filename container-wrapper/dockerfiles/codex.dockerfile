@@ -10,7 +10,7 @@ RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy 
 RUN apk add --no-cache git
 
 # Install Codex packages
-RUN npm init -y && npm install --ignore-scripts @modelcontextprotocol/sdk openai express
+RUN npm init -y && npm install --ignore-scripts @modelcontextprotocol/sdk openai express{{range .ExtraNpmPackages}} {{.}}{{end}}
 
 # Copy skills, prompts, and extensions
 {{if .SkillsDir}}COPY {{.SkillsDir}}/ ./skills/{{end}}

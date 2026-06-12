@@ -46,6 +46,7 @@ type Template struct {
 	Description       string    `json:"description"`
 	AgentType         string    `json:"agent_type"`
 	DockerfileContent string    `json:"dockerfile_content"`
+	EffectiveDockerfile string   `json:"effective_dockerfile,omitempty"`
 	PromptIDs         []string  `json:"prompt_ids,omitempty"`
 	SkillIDs          []string  `json:"skill_ids,omitempty"`
 	ToolIDs           []string  `json:"tool_ids,omitempty"`

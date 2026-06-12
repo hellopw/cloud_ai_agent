@@ -14,6 +14,12 @@ interface Message {
   content: ContentBlock[]
 }
 
+interface InstanceConfig {
+  prompts: { id: string; name: string; description: string }[]
+  skills: { id: string; name: string; description: string }[]
+  tools: { id: string; name: string; label: string; description: string }[]
+}
+
 /** Return a fresh copy of the blocks array with the last block replaced. */
 function replaceLast(blocks: ContentBlock[], updated: ContentBlock): ContentBlock[] {
   const copy = [...blocks]
@@ -29,6 +35,8 @@ export default function ChatPage() {
   const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([])
   const [containerInfo, setContainerInfo] = useState<{ provider?: string; model?: string }>({})
   const [instanceInfo, setInstanceInfo] = useState<{ host_port: number; status: string }>({ host_port: 0, status: '' })
+  const [instanceConfig, setInstanceConfig] = useState<InstanceConfig | null>(null)
+  const [configExpanded, setConfigExpanded] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const streamingBlocksRef = useRef<ContentBlock[]>([])
@@ -82,6 +90,15 @@ export default function ChatPage() {
       fetch('/api/instances/' + id + '/status')
         .then(r => r.json())
         .then(data => setContainerInfo(data))
+        .catch(() => {})
+    }
+  }, [id])
+
+  useEffect(() => {
+    if (id) {
+      fetch('/api/instances/' + id + '/config')
+        .then(r => r.json())
+        .then(data => setInstanceConfig(data))
         .catch(() => {})
     }
   }, [id])
@@ -604,6 +621,7 @@ export default function ChatPage() {
           display: 'flex',
           alignItems: 'center',
           gap: 12,
+          flexWrap: 'wrap',
           background: 'rgba(255,255,255,0.30)',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
@@ -625,7 +643,112 @@ export default function ChatPage() {
             )}
           </>
         )}
+        {instanceConfig && (
+          <>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>|</span>
+            <button
+              onClick={() => setConfigExpanded(!configExpanded)}
+              style={{
+                background: configExpanded ? 'var(--accent)' : 'transparent',
+                color: configExpanded ? 'var(--btn-text)' : 'var(--text-muted)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                padding: '1px 8px',
+                fontSize: 11,
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+            >
+              Tools ({instanceConfig.tools.length})
+            </button>
+            <button
+              onClick={() => setConfigExpanded(!configExpanded)}
+              style={{
+                background: configExpanded ? 'var(--accent)' : 'transparent',
+                color: configExpanded ? 'var(--btn-text)' : 'var(--text-muted)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                padding: '1px 8px',
+                fontSize: 11,
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+            >
+              Skills ({instanceConfig.skills.length})
+            </button>
+            <button
+              onClick={() => setConfigExpanded(!configExpanded)}
+              style={{
+                background: configExpanded ? 'var(--accent)' : 'transparent',
+                color: configExpanded ? 'var(--btn-text)' : 'var(--text-muted)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                padding: '1px 8px',
+                fontSize: 11,
+                cursor: 'pointer',
+                fontWeight: 500,
+              }}
+            >
+              Prompts ({instanceConfig.prompts.length})
+            </button>
+          </>
+        )}
       </div>
+
+      {configExpanded && instanceConfig && (
+        <div
+          style={{
+            padding: '10px 20px',
+            borderBottom: '1px solid var(--border)',
+            background: 'rgba(255,255,255,0.15)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            display: 'flex',
+            gap: 24,
+            flexWrap: 'wrap',
+          }}
+        >
+          {instanceConfig.tools.length > 0 && (
+            <div style={{ minWidth: 150 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                Tools ({instanceConfig.tools.length})
+              </div>
+              {instanceConfig.tools.map(t => (
+                <div key={t.id} style={{ fontSize: 12, padding: '2px 0', color: 'var(--text)' }}>
+                  <span style={{ fontWeight: 500 }}>{t.label || t.name}</span>
+                  {t.description && <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>{t.description}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {instanceConfig.skills.length > 0 && (
+            <div style={{ minWidth: 150 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                Skills ({instanceConfig.skills.length})
+              </div>
+              {instanceConfig.skills.map(s => (
+                <div key={s.id} style={{ fontSize: 12, padding: '2px 0', color: 'var(--text)' }}>
+                  <span style={{ fontWeight: 500 }}>{s.name}</span>
+                  {s.description && <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>{s.description}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {instanceConfig.prompts.length > 0 && (
+            <div style={{ minWidth: 150 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>
+                Prompts ({instanceConfig.prompts.length})
+              </div>
+              {instanceConfig.prompts.map(p => (
+                <div key={p.id} style={{ fontSize: 12, padding: '2px 0', color: 'var(--text)' }}>
+                  <span style={{ fontWeight: 500 }}>{p.name}</span>
+                  {p.description && <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>{p.description}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* messages */}
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>

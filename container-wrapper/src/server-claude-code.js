@@ -105,11 +105,13 @@ const builtinTools = [
 // ---- MCP extension loading ----
 const mcpToolConfigs = {}; // tool_name -> handler config
 let allTools = [...builtinTools]; // start with builtins, MCP added progressively
+let mcpDiscoveryPromise = null; // resolves when all MCP servers are discovered
 
 function startMcpDiscovery() {
   const extPath = path.resolve("/app/extensions/extensions.json");
   if (!fs.existsSync(extPath)) {
     console.log("No extensions.json found at", extPath);
+    mcpDiscoveryPromise = Promise.resolve();
     return;
   }
   const extConfigs = JSON.parse(fs.readFileSync(extPath, "utf-8"));
@@ -119,7 +121,7 @@ function startMcpDiscovery() {
   const seen = new Set(builtinTools.map(t => t.name));
 
   // Discover each MCP server independently – tools are added as they arrive
-  for (const cfg of mcpConfigs) {
+  const discoveryTasks = mcpConfigs.map(cfg =>
     listMcpTools({
       transport: cfg.handler.transport || "stdio",
       command: cfg.handler.command,
@@ -147,8 +149,14 @@ function startMcpDiscovery() {
       })
       .catch(err => {
         console.error(`MCP "${cfg.name}": discovery failed - ${err.message || err}`);
-      });
-  }
+      })
+  );
+
+  mcpDiscoveryPromise = Promise.allSettled(discoveryTasks);
+}
+
+async function ensureMcpReady() {
+  if (mcpDiscoveryPromise) await mcpDiscoveryPromise;
 }
 
 function getTools() {
@@ -328,6 +336,7 @@ app.post("/chat", async (req, res) => {
   }
 
   try {
+    await ensureMcpReady();
     const messages = [{ role: "user", content: message }];
 
     let turnCount = 0;

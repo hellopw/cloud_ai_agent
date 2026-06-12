@@ -348,7 +348,7 @@ export default function AgentsPage() {
             </button>
             {expandedDf === a.id && (
               <pre style={{ marginTop: 8, maxHeight: 300, overflow: 'auto', fontSize: 12 }}>
-                {getTemplate(a.template_id)?.dockerfile_content || '(empty)'}
+                {getTemplate(a.template_id)?.effective_dockerfile || '(empty)'}
               </pre>
             )}
           </div>

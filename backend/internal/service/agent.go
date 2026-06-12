@@ -45,6 +45,10 @@ func NewAgentService(s *store.Store) *AgentService {
 	}
 }
 
+func (svc *AgentService) ProjectRoot() string {
+	return svc.projectRoot
+}
+
 func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 	agent, err := svc.store.GetAgent(agentID)
 	if err != nil || agent == nil {
