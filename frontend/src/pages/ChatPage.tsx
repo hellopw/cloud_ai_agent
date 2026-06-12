@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
+import 'highlight.js/styles/github-dark.css'
 
 type ContentBlock =
   | { type: 'text'; text: string }
@@ -498,8 +501,10 @@ export default function ChatPage() {
     switch (block.type) {
       case 'text':
         return (
-          <div key={blockIdx} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {block.text}
+          <div key={blockIdx} className="chat-markdown">
+            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+              {block.text}
+            </ReactMarkdown>
           </div>
         )
 
