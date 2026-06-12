@@ -14,6 +14,7 @@ import (
 	"cloud_ai_agent/internal/store"
 	"encoding/json"
 	"hash/fnv"
+	"net"
 	"slices"
 )
 
@@ -548,17 +549,27 @@ func (svc *AgentService) findFreePort(instanceID string) int {
 		}
 	}
 	for port := base; port <= 12000; port++ {
-		if !slices.Contains(used, port) {
+		if !slices.Contains(used, port) && isPortAvailable(port) {
 			return port
 		}
 	}
 	// fallback: scan from 3001 upward
 	for port := 3001; port <= 12000; port++ {
-		if !slices.Contains(used, port) {
+		if !slices.Contains(used, port) && isPortAvailable(port) {
 			return port
 		}
 	}
 	return 3001
+}
+
+func isPortAvailable(port int) bool {
+	addr := fmt.Sprintf(":%d", port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return false
+	}
+	ln.Close()
+	return true
 }
 
 func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (*model.Instance, error) {
