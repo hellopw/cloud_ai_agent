@@ -40,7 +40,7 @@ type ChatMessage struct {
 }
 
 type SSEEvent struct {
-	Event string `json:"event"`
+	Event string          `json:"event"`
 	Data  json.RawMessage `json:"data"`
 }
 
@@ -98,7 +98,9 @@ func proxyChatToContainer(conn *websocket.Conn, containerURL, message string) {
 			break
 		}
 		line = strings.TrimSpace(line)
-		if line == "" { continue }
+		if line == "" {
+			continue
+		}
 
 		if strings.HasPrefix(line, "event: ") {
 			eventType := strings.TrimPrefix(line, "event: ")
@@ -106,13 +108,17 @@ func proxyChatToContainer(conn *websocket.Conn, containerURL, message string) {
 			var dataLine string
 			for {
 				dataLine, err = reader.ReadString('\n')
-				if err != nil { break }
+				if err != nil {
+					break
+				}
 				dataLine = strings.TrimSpace(dataLine)
-				if dataLine != "" { break }
+				if dataLine != "" {
+					break
+				}
 			}
 			if strings.HasPrefix(dataLine, "data: ") {
-						dataJSON := strings.TrimPrefix(dataLine, "data: ")
-						log.Printf("ws: forwarding event type=%s data_len=%d", eventType, len(dataJSON))
+				dataJSON := strings.TrimPrefix(dataLine, "data: ")
+				log.Printf("ws: forwarding event type=%s data_len=%d", eventType, len(dataJSON))
 				mu.Lock()
 				conn.WriteJSON(map[string]interface{}{
 					"type": eventType,
@@ -129,6 +135,25 @@ func sendWSEvent(conn *websocket.Conn, eventType string, data interface{}) {
 		"type": eventType,
 		"data": data,
 	})
+}
+
+func HandleAbort(containerHost string, containerPort int) http.HandlerFunc {
+	url := fmt.Sprintf("http://%s:%d/abort", containerHost, containerPort)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		resp, err := proxyClient.Post(url, "application/json", nil)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	}
 }
 
 // HandleProxy forwards a simple HTTP GET to a container endpoint
@@ -150,4 +175,3 @@ func HandleProxy(containerHost string, containerPort int, path string) http.Hand
 		io.Copy(w, resp.Body)
 	}
 }
-

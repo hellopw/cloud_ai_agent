@@ -194,6 +194,7 @@ export default function ChatPage() {
       }
 
       case 'agent_end': {
+        console.log('[ChatPage] agent_end received, blocks_len=', streamingBlocksRef.current.length, 'committed=', messageCommittedRef.current, 'hasMessages=', !!data?.messages)
         if (streamingBlocksRef.current.length > 0) {
           const blocks = [...streamingBlocksRef.current]
           if (messageCommittedRef.current) {
@@ -206,6 +207,7 @@ export default function ChatPage() {
           }
         } else if (!messageCommittedRef.current && data?.messages && Array.isArray(data.messages)) {
           // No streaming blocks built — parse final messages from agent_end payload.
+          console.log('[ChatPage] agent_end: using data.messages fallback, count=', data.messages.length)
           const lastAssistantMsg = [...data.messages].reverse().find(
             (m: any) => m.role === 'assistant'
           )
@@ -222,6 +224,15 @@ export default function ChatPage() {
                   toolCallId: item.id || String(blocks.length),
                   toolName: item.name || 'unknown',
                   input: item.input || {},
+                })
+              } else if (item.type === 'tool_result') {
+                // tool_result blocks carry results in content field
+                blocks.push({
+                  type: 'tool_use',
+                  toolCallId: item.tool_use_id || item.id || String(blocks.length),
+                  toolName: 'tool',
+                  input: {},
+                  result: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
                 })
               }
             }

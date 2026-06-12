@@ -121,8 +121,8 @@ func TestTemplateTools(t *testing.T) {
 
 	// Create template
 	createResult := callTool(d, handleCreateTemplate(d), map[string]any{
-		"name":              "test-template",
-		"description":       "A test template",
+		"name":               "test-template",
+		"description":        "A test template",
 		"dockerfile_content": "FROM alpine",
 	})
 	if !contains(createResult, "test-template") {
@@ -405,10 +405,10 @@ func TestTemplateBindings(t *testing.T) {
 	d.store.CreateTemplate(tmpl)
 
 	updateResult := callTool(d, handleUpdateTemplateBindings(d), map[string]any{
-		"id":             tmpl.ID,
-		"prompt_ids":     p.ID,
-		"skill_ids":      sk.ID,
-		"tool_ids":       tool.ID,
+		"id":         tmpl.ID,
+		"prompt_ids": p.ID,
+		"skill_ids":  sk.ID,
+		"tool_ids":   tool.ID,
 	})
 	if !contains(updateResult, "bindings updated") {
 		t.Errorf("update_template_bindings: expected success, got %s", updateResult)

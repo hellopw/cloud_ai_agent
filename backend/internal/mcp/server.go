@@ -273,6 +273,7 @@ func registerInstanceTools(s *server.MCPServer, d *deps) {
 	s.AddTool(mcp.NewTool("start_instance",
 		mcp.WithDescription("Start an agent container instance"),
 		mcp.WithString("agent_id", mcp.Description("Agent ID"), mcp.Required()),
+		mcp.WithString("provider_config_id", mcp.Description("Provider config ID"), mcp.Required()),
 	), handleStartInstance(d))
 
 	s.AddTool(mcp.NewTool("delete_instance",
@@ -317,7 +318,11 @@ func handleStartInstance(d *deps) server.ToolHandlerFunc {
 		if d.agentSvc == nil {
 			return errorResult("agent service not available"), nil
 		}
-		instance, err := d.agentSvc.StartInstance(ctx, agentID, "")
+		providerConfigID, err := request.RequireString("provider_config_id")
+		if err != nil {
+			return errorResult(err.Error()), nil
+		}
+		instance, err := d.agentSvc.StartInstance(ctx, agentID, providerConfigID)
 		if err != nil {
 			return errorResult(err.Error()), nil
 		}

@@ -345,8 +345,12 @@ func (h *Handler) updateAgent(w http.ResponseWriter, r *http.Request, id string)
 	a.ErrorMsg = existing.ErrorMsg
 	a.CreatedAt = existing.CreatedAt
 	// Preserve credentials if not re-submitted (empty string means keep existing)
-	if a.GitUsername == "" { a.GitUsername = existing.GitUsername }
-	if a.GitPassword == "" { a.GitPassword = existing.GitPassword }
+	if a.GitUsername == "" {
+		a.GitUsername = existing.GitUsername
+	}
+	if a.GitPassword == "" {
+		a.GitPassword = existing.GitPassword
+	}
 	if err := h.store.UpdateAgent(&a); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -501,6 +505,7 @@ func (h *Handler) deleteResource(w http.ResponseWriter, r *http.Request, id stri
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
+
 // --- Memories ---
 
 func (h *Handler) listMemories(w http.ResponseWriter, r *http.Request) {
@@ -565,7 +570,6 @@ func (h *Handler) deleteMemory(w http.ResponseWriter, r *http.Request, id string
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
-
 // --- Agent Teams ---
 
 func (h *Handler) listAgentTeams(w http.ResponseWriter, r *http.Request) {
@@ -623,8 +627,12 @@ func (h *Handler) updateAgentTeam(w http.ResponseWriter, r *http.Request, id str
 	t.ImageTag = existing.ImageTag
 	t.ErrorMsg = existing.ErrorMsg
 	t.CreatedAt = existing.CreatedAt
-	if t.GitUsername == "" { t.GitUsername = existing.GitUsername }
-	if t.GitPassword == "" { t.GitPassword = existing.GitPassword }
+	if t.GitUsername == "" {
+		t.GitUsername = existing.GitUsername
+	}
+	if t.GitPassword == "" {
+		t.GitPassword = existing.GitPassword
+	}
 	if err := h.store.UpdateAgentTeam(&t); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -681,7 +689,6 @@ func (h *Handler) startTeamInstance(w http.ResponseWriter, r *http.Request, id s
 }
 
 // --- Health ---
-
 
 // --- Provider Configs ---
 
@@ -750,7 +757,6 @@ func (h *Handler) deleteProviderConfig(w http.ResponseWriter, r *http.Request, i
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
-
 
 func (h *Handler) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

@@ -62,10 +62,48 @@ app.post("/chat", async (req, res) => {
       stream: true,
     });
 
+    // Accumulate text and thinking deltas into frontend-compatible blocks
+    let currentText = "";
+    let currentThinking = "";
+
     for await (const event of stream) {
-      sendEvent("response", event);
+      if (event.type === "response.output_text.delta") {
+        currentText += event.delta || "";
+        sendEvent("message_update", {
+          assistantMessageEvent: {
+            type: "text_delta",
+            delta: event.delta || "",
+          },
+        });
+      } else if (event.type === "response.reasoning_text.delta") {
+        currentThinking += event.delta || "";
+        sendEvent("message_update", {
+          assistantMessageEvent: {
+            type: "thinking_delta",
+            delta: event.delta || "",
+          },
+        });
+      }
+      // response.created, response.completed, etc. are metadata —
+      // the frontend intentionally ignores them.
     }
-    sendEvent("agent_end", { stopReason: "end_turn" });
+
+    // Build the final assistant message so the frontend can persist it.
+    const contentBlocks = [];
+    if (currentThinking) {
+      contentBlocks.push({ type: "thinking", thinking: currentThinking });
+    }
+    if (currentText) {
+      contentBlocks.push({ type: "text", text: currentText });
+    }
+
+    sendEvent("agent_end", {
+      stopReason: "end_turn",
+      messages: [
+        { role: "user", content: message },
+        { role: "assistant", content: contentBlocks },
+      ],
+    });
   } catch (err) {
     sendEvent("error", { message: err.message });
   } finally {
