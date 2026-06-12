@@ -7,7 +7,7 @@ export default function TemplateEditPage() {
   const navigate = useNavigate()
   const isNew = !id
 
-  const [form, setForm] = useState({ name: '', description: '', dockerfile_content: '' })
+  const [form, setForm] = useState({ name: '', description: '', agent_type: 'pi', dockerfile_content: '' })
   const [allPrompts, setAllPrompts] = useState<any[]>([])
   const [allSkills, setAllSkills] = useState<any[]>([])
   const [allTools, setAllTools] = useState<any[]>([])
@@ -23,7 +23,7 @@ export default function TemplateEditPage() {
       setAllPrompts(p); setAllSkills(s); setAllTools(t)
       if (id) {
         templatesApi.get(id).then((tmpl: any) => {
-          setForm({ name: tmpl.name, description: tmpl.description, dockerfile_content: tmpl.dockerfile_content || '' })
+          setForm({ name: tmpl.name, description: tmpl.description, agent_type: tmpl.agent_type || 'pi', dockerfile_content: tmpl.dockerfile_content || '' })
           setSelectedPrompts(tmpl.prompt_ids || [])
           setSelectedSkills(tmpl.skill_ids || [])
           setSelectedTools(tmpl.tool_ids || [])
@@ -61,6 +61,15 @@ export default function TemplateEditPage() {
       <form className="form" onSubmit={handleSubmit}>
         <div className="form-group"><label>Name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
         <div className="form-group"><label>Description</label><input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
+
+        <div className="form-group">
+          <label>Agent Type</label>
+          <select value={form.agent_type} onChange={(e) => setForm({ ...form, agent_type: e.target.value })}>
+            <option value="pi">PI Agent (default)</option>
+            <option value="claude-code">Claude Code</option>
+            <option value="codex">Codex</option>
+          </select>
+        </div>
 
         <div className="binding-section">
           <h4>Prompts ({selectedPrompts.length} selected)</h4>

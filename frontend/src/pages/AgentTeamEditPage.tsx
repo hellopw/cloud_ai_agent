@@ -130,7 +130,7 @@ export default function AgentTeamEditPage() {
             <label>Dockerfile Template</label>
             <select value={templateId} onChange={e => setTemplateId(e.target.value)} required>
               <option value="">Select template...</option>
-              {templates.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {templates.map((t: any) => <option key={t.id} value={t.id}>{t.name} [{t.agent_type || 'pi'}]</option>)}
             </select>
           </div>
           <div className="form-group">
@@ -224,7 +224,7 @@ export default function AgentTeamEditPage() {
                   <label>Template</label>
                   <select value={m.agent_template_id} onChange={e => updateMember(idx, 'agent_template_id', e.target.value)}>
                     <option value="">Select template...</option>
-                    {templates.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {templates.map((t: any) => <option key={t.id} value={t.id}>{t.name} [{t.agent_type || 'pi'}]</option>)}
                   </select>
                 </div>
                 <div className="form-group">

@@ -28,7 +28,7 @@ export default function TemplatesPage() {
       ) : items.map((t: any) => (
         <div key={t.id} className="card card-row">
           <div>
-            <h3>{t.name}</h3>
+            <h3>{t.name} <span className={`tag ${(t.agent_type || 'pi') === 'claude-code' ? 'tag-ready' : (t.agent_type || 'pi') === 'codex' ? 'tag-failed' : 'tag-draft'}`} style={{ fontSize: 10, marginLeft: 8 }}>{t.agent_type || 'pi'}</span></h3>
             <p>{t.description || 'No description'}</p>
             <p style={{ fontSize: 11, marginTop: 4 }}>Updated: {new Date(t.updated_at).toLocaleString()}</p>
             <button

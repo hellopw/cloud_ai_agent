@@ -51,6 +51,7 @@ func (s *Store) Migrate() error {
 	s.db.Exec("ALTER TABLE agents ADD COLUMN git_password TEXT DEFAULT ''")
 	s.db.Exec("ALTER TABLE instances ADD COLUMN error_msg TEXT DEFAULT ''")
 	s.db.Exec("ALTER TABLE instances ADD COLUMN team_id TEXT DEFAULT ''")
+	s.db.Exec("ALTER TABLE templates ADD COLUMN agent_type TEXT DEFAULT ''")
 	return nil
 }
 
@@ -85,6 +86,7 @@ func migrationStatements() []string {
 			id                 TEXT PRIMARY KEY,
 			name               TEXT NOT NULL UNIQUE,
 			description        TEXT DEFAULT '',
+			agent_type         TEXT DEFAULT 'pi',
 			dockerfile_content TEXT DEFAULT '',
 			created_at         DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at         DATETIME DEFAULT CURRENT_TIMESTAMP
