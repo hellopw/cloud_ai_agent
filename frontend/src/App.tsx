@@ -18,7 +18,6 @@ import ModelsPage from './pages/ModelsPage'
 import AgentTeamsPage from './pages/AgentTeamsPage'
 import AgentTeamEditPage from './pages/AgentTeamEditPage'
 import AgentPage from './pages/AgentPage'
-import GlassUIDemoPage from './pages/GlassUIDemoPage'
 
 const navItems = [
   { to: '/agent', label: 'Agent', icon: 'agent' as const },
@@ -32,7 +31,6 @@ const navItems = [
   { to: '/instances', label: 'Instances', icon: 'instances' as const },
   { to: '/models', label: 'Models', icon: 'models' as const },
   { to: '/resources', label: 'Resources', icon: 'resources' as const },
-  { to: '/glass-demo', label: 'Glass UI', icon: 'palette' as const },
 ]
 
 function App() {
@@ -76,7 +74,6 @@ function App() {
           <Route path="/instances/:id/chat" element={<ChatPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/resources" element={<ResourcesPage />} />
-          <Route path="/glass-demo" element={<GlassUIDemoPage />} />
         </Routes>
       </main>
     </div>
