@@ -7,20 +7,36 @@ interface Message {
   toolCall?: { toolCallId: string; toolName: string; input: any }
 }
 
+interface ConfigItem {
+  id: string
+  name: string
+  description?: string
+  content?: string
+  label?: string
+  dsl_definition?: string
+}
+
+interface InstanceConfig {
+  prompts: ConfigItem[]
+  skills: ConfigItem[]
+  tools: ConfigItem[]
+}
+
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [connected, setConnected] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [containerInfo, setContainerInfo] = useState<{ provider?: string; model?: string }>({})
   const [instanceInfo, setInstanceInfo] = useState<{ host_port: number; status: string }>({ host_port: 0, status: '' })
-  const wsRef = useRef<WebSocket | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [instanceConfig, setInstanceConfig] = useState<InstanceConfig>({ prompts: [], skills: [], tools: [] })
+  const [configOpen, setConfigOpen] = useState(false)
   const streamingRef = useRef('')
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const rafRef = useRef<number>(0)
   const needsFlushRef = useRef(false)
   const idRef = useRef(id)
+  const wasThinkingRef = useRef(false)
 
   // Keep idRef in sync so closures always have the correct instance ID
   idRef.current = id
@@ -93,6 +109,19 @@ export default function ChatPage() {
       .catch(() => {})
   }, [id])
 
+  // Fetch associated prompts, skills, tools
+  useEffect(() => {
+    if (!id) return
+    fetch('/api/instances/' + id + '/config')
+      .then(r => r.json())
+      .then(data => setInstanceConfig({
+        prompts: data.prompts || [],
+        skills: data.skills || [],
+        tools: data.tools || [],
+      }))
+      .catch(() => {})
+  }, [id])
+
 
   // Fetch container status via backend proxy
   useEffect(() => {
@@ -104,112 +133,9 @@ export default function ChatPage() {
     }
   }, [id])
 
+  // Cleanup on unmount or id change
   useEffect(() => {
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    let ws: WebSocket | null = null
-
-    const connect = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const url = `${protocol}//${window.location.host}/api/instances/${id}/chat`
-      console.log('[ChatPage] WebSocket connecting to', url)
-      ws = new WebSocket(url)
-      wsRef.current = ws
-
-      ws.onopen = () => {
-        console.log('[ChatPage] WebSocket connected')
-        setConnected(true)
-      }
-      ws.onclose = (e) => {
-        console.log('[ChatPage] WebSocket closed, code=' + e.code + ' reason=' + e.reason)
-        setConnected(false)
-        // Auto-reconnect after 3 seconds
-        reconnectTimer = setTimeout(connect, 3000)
-      }
-      ws.onerror = (e) => {
-        console.error('[ChatPage] WebSocket error', e)
-      }
-
-      ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data)
-
-      switch (msg.type) {
-        case 'text_delta':
-          streamingRef.current += (msg.data.delta || '')
-          scheduleContentUpdate()
-          break
-        case 'tool_call':
-          const tc = msg.data
-          setMessages((prev) => [...prev, {
-            role: 'tool',
-            content: `Calling: ${tc.toolName}`,
-            toolCall: { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input },
-          }])
-          saveMessage('tool', `Calling: ${tc.toolName}`, { toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input })
-          break
-        case 'tool_result':
-          setMessages((prev) => [...prev, {
-            role: 'system',
-            content: `Result from tool: ${JSON.stringify(msg.data.content).substring(0, 200)}`,
-          }])
-          saveMessage('system', `Result from tool: ${JSON.stringify(msg.data.content).substring(0, 200)}`)
-          break
-        case 'message_update':
-          const me = msg.data?.assistantMessageEvent
-          if (!me) break
-          switch (me.type) {
-            case 'thinking_delta':
-              if (!streamingRef.current.startsWith('[Thinking]\n')) {
-                streamingRef.current = '[Thinking]\n' + streamingRef.current
-              }
-              streamingRef.current += (me.delta || '')
-              scheduleContentUpdate()
-              break
-            case 'text_delta':
-              // Add a separator when switching from thinking to text
-              if (streamingRef.current && !streamingRef.current.endsWith('\n\n')) {
-                streamingRef.current += '\n\n'
-              }
-              streamingRef.current += (me.delta || '')
-              scheduleContentUpdate()
-              break
-          }
-          break
-        case 'agent_end':
-          console.log('[ChatPage] agent_end received, streamingLen=' + streamingRef.current.length)
-          if (streamingRef.current) {
-            setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
-            saveMessage('assistant', streamingRef.current)
-          }
-          cancelPendingFlush()
-          streamingRef.current = ''
-          setStreamingContent('')
-          break
-        case 'message_end':
-          const me2 = msg.data
-          if (me2?.message?.stopReason === 'error') {
-            setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (me2.message.errorMessage || 'Unknown error') }])
-          } else if (streamingRef.current) {
-            setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
-            saveMessage('assistant', streamingRef.current)
-            cancelPendingFlush()
-            streamingRef.current = ''
-            setStreamingContent('')
-          }
-          break
-        case 'error':
-          setMessages((prev) => [...prev, { role: 'system', content: `Error: ${msg.data.message}` }])
-          break
-        default:
-          setMessages((prev) => [...prev, { role: 'system', content: `[${msg.type}] ${JSON.stringify(msg.data).substring(0, 300)}` }])
-      }
-    }
-
-    }
-    connect()
     return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      if (ws) ws.close()
-      wsRef.current = null
       cancelPendingFlush()
     }
   }, [id])
@@ -220,9 +146,15 @@ export default function ChatPage() {
 
   // SSE fallback for when WebSocket is blocked by corporate proxy
   const sendViaHttp = async (trimmed: string) => {
-    console.log('[ChatPage] HTTP fallback: sending message')
+    const instanceId = idRef.current
+    if (!instanceId) {
+      console.error('[ChatPage] sendViaHttp: no instance id')
+      setMessages((prev) => [...prev, { role: 'system', content: 'Error: no instance id' }])
+      return
+    }
+    console.log('[ChatPage] sendViaHttp: sending to', instanceId)
     try {
-      const resp = await fetch('/api/instances/' + id + '/chat-http', {
+      const resp = await fetch('/api/instances/' + instanceId + '/chat-http', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed }),
@@ -236,34 +168,25 @@ export default function ChatPage() {
 
       const decoder = new TextDecoder()
       let buffer = ''
+      let lastEventType = ''
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-        // Process complete SSE lines
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const rawLine of lines) {
+        const rawLines = buffer.split('\n')
+        buffer = rawLines.pop() || ''
+        for (const rawLine of rawLines) {
           const line = rawLine.trim()
           if (!line) continue
           try {
-            // SSE format: "event: TYPE" or "data: {...}"  
             if (line.startsWith('event: ')) {
-              // Currently events come as "event: TYPE\ndata: {...}" pairs,
-              // but they arrive on separate lines from the reader.
-              // We handle them in the next iteration when data line arrives.
+              lastEventType = line.substring(7)
               continue
             }
             if (line.startsWith('data: ')) {
               const dataStr = line.substring(6)
-              // Check previous line for event type
-              const prevLine = lines[lines.length - 1]?.trim() || ''
-              let eventType = ''
-              if (prevLine.startsWith('event: ')) {
-                eventType = prevLine.substring(7)
-              }
               const parsed = JSON.parse(dataStr)
-              processEvent({ type: eventType || 'text_delta', data: parsed })
+              processEvent({ type: lastEventType || 'text_delta', data: parsed })
             }
           } catch {
             // Skip malformed lines
@@ -327,6 +250,7 @@ export default function ChatPage() {
         if (!me3) break
         switch (me3.type) {
           case 'thinking_delta':
+            wasThinkingRef.current = true
             if (!streamingRef.current.startsWith('[Thinking]\n')) {
               streamingRef.current = '[Thinking]\n' + streamingRef.current
             }
@@ -334,8 +258,9 @@ export default function ChatPage() {
             scheduleContentUpdate()
             break
           case 'text_delta':
-            if (streamingRef.current && !streamingRef.current.endsWith('\n\n')) {
+            if (wasThinkingRef.current) {
               streamingRef.current += '\n\n'
+              wasThinkingRef.current = false
             }
             streamingRef.current += (me3.delta || '')
             scheduleContentUpdate()
@@ -350,6 +275,7 @@ export default function ChatPage() {
         }
         cancelPendingFlush()
         streamingRef.current = ''
+        wasThinkingRef.current = false
         setStreamingContent('')
         break
       case 'message_end':
@@ -361,10 +287,19 @@ export default function ChatPage() {
           saveMessage('assistant', streamingRef.current)
           cancelPendingFlush()
           streamingRef.current = ''
+          wasThinkingRef.current = false
           setStreamingContent('')
         }
         break
       case 'error':
+        if (streamingRef.current) {
+          setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
+          saveMessage('assistant', streamingRef.current)
+          cancelPendingFlush()
+          streamingRef.current = ''
+          wasThinkingRef.current = false
+          setStreamingContent('')
+        }
         setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + eventData.data.message }])
         break
       default:
@@ -374,33 +309,11 @@ export default function ChatPage() {
 
   const handleSend = () => {
     const trimmed = input.trim()
-    console.log('[ChatPage] handleSend called', { input, trimmed, connected, wsReadyState: wsRef.current?.readyState })
-    if (!trimmed) {
-      console.log('[ChatPage] handleSend: empty input, returning')
-      return
-    }
-    const wsState = wsRef.current?.readyState
-    if (wsState !== WebSocket.OPEN) {
-      // WebSocket not available, fall back to HTTP SSE
-      console.log('[ChatPage] handleSend: WebSocket not OPEN (state=' + wsState + '), using HTTP fallback')
-      setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
-      saveMessage('user', trimmed)
-      setInput('')
-      sendViaHttp(trimmed)
-      return
-    }
-    console.log('[ChatPage] handleSend: sending via WebSocket')
+    if (!trimmed) return
     setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
     saveMessage('user', trimmed)
-    try {
-      wsRef.current!.send(JSON.stringify({ type: 'chat', message: trimmed }))
-      setInput('')
-    } catch (e) {
-      console.error('[ChatPage] handleSend: send failed, falling back to HTTP', e)
-      setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
-      setInput('')
-      sendViaHttp(trimmed)
-    }
+    setInput('')
+    sendViaHttp(trimmed)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -422,9 +335,7 @@ export default function ChatPage() {
       }}>
         <Link to="/instances" className="btn btn-ghost" style={{ fontSize: 12 }}>Back</Link>
         <h3 style={{ fontSize: 15, margin: 0 }}>Instance {id?.substring(0, 8)}...</h3>
-        <span className={`tag ${connected ? 'tag-ready' : 'tag-failed'}`} title={`WebSocket readyState: ${wsRef.current?.readyState}`}>
-          {connected ? 'connected' : 'disconnected [' + (wsRef.current?.readyState ?? 'null') + ']'}
-        </span>
+        <span className="tag tag-ready">connected</span>
         {containerInfo.provider && (
           <>
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>|</span>
@@ -434,7 +345,67 @@ export default function ChatPage() {
             )}
           </>
         )}
+        {(instanceConfig.prompts.length > 0 || instanceConfig.skills.length > 0 || instanceConfig.tools.length > 0) && (
+          <>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>|</span>
+            <button
+              onClick={() => setConfigOpen(!configOpen)}
+              className="btn btn-ghost"
+              style={{ fontSize: 12, padding: '2px 8px' }}
+            >
+              Prompts({instanceConfig.prompts.length}) Skills({instanceConfig.skills.length}) Tools({instanceConfig.tools.length})
+            </button>
+          </>
+        )}
       </div>
+
+      {configOpen && (
+        <div style={{
+          padding: '16px 20px',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--bg)',
+          display: 'flex',
+          gap: 24,
+          overflow: 'auto',
+        }}>
+          {instanceConfig.prompts.length > 0 && (
+            <div style={{ minWidth: 200 }}>
+              <h4 style={{ fontSize: 13, margin: '0 0 6px 0' }}>Prompts</h4>
+              {instanceConfig.prompts.map(p => (
+                <div key={p.id} style={{ fontSize: 12, marginBottom: 4 }}>
+                  <strong>{p.name}</strong>
+                  {p.description && <div style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 100, overflow: 'auto' }}>{p.description}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {instanceConfig.skills.length > 0 && (
+            <div style={{ minWidth: 200 }}>
+              <h4 style={{ fontSize: 13, margin: '0 0 6px 0' }}>Skills</h4>
+              {instanceConfig.skills.map(s => (
+                <div key={s.id} style={{ fontSize: 12, marginBottom: 4 }}>
+                  <strong>{s.name}</strong>
+                  {s.description && <div style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 100, overflow: 'auto' }}>{s.description}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {instanceConfig.tools.length > 0 && (
+            <div style={{ minWidth: 200 }}>
+              <h4 style={{ fontSize: 13, margin: '0 0 6px 0' }}>Tools</h4>
+              {instanceConfig.tools.map(t => (
+                <div key={t.id} style={{ fontSize: 12, marginBottom: 4 }}>
+                  <strong>{t.label || t.name}</strong>
+                  {t.description && <div style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 100, overflow: 'auto' }}>{t.description}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {instanceConfig.prompts.length === 0 && instanceConfig.skills.length === 0 && instanceConfig.tools.length === 0 && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No prompts, skills, or tools configured for this instance.</span>
+          )}
+        </div>
+      )}
 
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         {messages.map((msg, i) => (
@@ -505,8 +476,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={connected ? "Type a message... (Enter to send, Shift+Enter for new line)" : "Disconnected \u2014 start the instance to chat"}
-            disabled={!connected}
+            placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
             rows={2}
             style={{
               flex: 1,
@@ -520,7 +490,7 @@ export default function ChatPage() {
               resize: 'none',
             }}
           />
-          <button onClick={handleSend} disabled={!connected} className="btn btn-primary" style={{ alignSelf: 'flex-end', opacity: connected ? 1 : 0.5 }}>
+          <button onClick={handleSend} className="btn btn-primary" style={{ alignSelf: 'flex-end' }}>
             Send
           </button>
         </div>

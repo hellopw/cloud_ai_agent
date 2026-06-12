@@ -10,6 +10,17 @@
 | 部署目录 | `/home/binwang/cloud_ai_agent/` |
 | 端口 | 29080（默认 8080 被 Tomcat 占用） |
 
+## 部署前检查
+
+**关键**：上传前必须清理 `deploy/` 目录下的本地运行时产物，否则 SCP 会覆盖服务器数据：
+
+```powershell
+# 清理本地运行时产物（防止覆盖服务器数据）
+Remove-Item -Recurse -Force D:\Code\cloud_ai_agent\deploy\data -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force D:\Code\cloud_ai_agent\deploy\logs -ErrorAction SilentlyContinue
+Remove-Item -Force D:\Code\cloud_ai_agent\deploy\cloud-ai-agent.exe -ErrorAction SilentlyContinue
+```
+
 ## 部署步骤
 
 ### 1. 本地构建
@@ -18,6 +29,9 @@
 
 ```powershell
 cd D:\Code\cloud_ai_agent
+
+# 0. 清理上次的构建产物
+Remove-Item -Force ..\deploy\cloud-ai-agent -ErrorAction SilentlyContinue
 
 # 1. 编译 Go 二进制（交叉编译到 Linux）
 # Go build cache 可能因权限问题失败，设置 GOCACHE 到项目内目录
@@ -50,6 +64,7 @@ scp -r D:\Code\cloud_ai_agent\deploy\* 152-binwang:/home/binwang/cloud_ai_agent/
 - **SCP 上传失败 `dest open ... Failure`**：服务器上旧的 `cloud-ai-agent` 二进制可能正在运行，文件被占用。先 SSH 到服务器删除旧二进制再上传：`ssh 152-binwang "rm -f /home/binwang/cloud_ai_agent/cloud-ai-agent"`
 - **SCP 认证失败**：确认 `~/.ssh/config` 中有 `152-binwang` Host 配置，且对应的 `IdentityFile` 密钥存在
 - **其他文件（frontend、container-wrapper 等）上传无此问题**：只有正在运行的二进制文件会因为被占用而写入失败
+- **数据覆盖风险**：如果本地 `deploy/data/` 目录下有数据库文件，SCP 上传会直接覆盖服务器上的生产数据库。务必在构建前清理（见上方「部署前检查」）
 
 ### 3. 服务器上启动
 
@@ -58,23 +73,71 @@ scp -r D:\Code\cloud_ai_agent\deploy\* 152-binwang:/home/binwang/cloud_ai_agent/
 ssh 152-binwang
 
 cd /home/binwang/cloud_ai_agent
-chmod +x cloud-ai-agent start.sh
+chmod +x cloud-ai-agent
 mkdir -p data logs
 
-# 启动（指定端口 29080，因为 8080 被 Tomcat 占用）
-PORT=29080 nohup ./cloud-ai-agent > logs/server.log 2>&1 &
+# 推荐使用 start.sh 启动（已配置好端口、日志等）
+bash start.sh
 
-# 或使用 start.sh（需先确认 start.sh 中端口配置）
+# 或手动启动（指定端口 29080，因为 8080 被 Tomcat 占用）
+PORT=29080 nohup ./cloud-ai-agent > logs/server.log 2>&1 &
 ```
+
+注意：
+- **start.sh 换行符**：如果 `start.sh` 报 `$'\r': 未找到命令`，说明文件是 Windows CRLF 换行。在服务器上执行 `sed -i 's/\r$//' start.sh` 修复
+- **SSH nohup 问题**：直接通过 SSH 执行 `nohup ... &` 可能导致 SSH 等待后台进程无法退出（exit 255）。推荐 SSH 到服务器后用 `bash start.sh` 启动，或使用 `start.sh` 脚本
 
 ### 4. 更新部署（重启）
 
 后续更新只需重复步骤 1-2，然后在服务器上重启：
 
 ```bash
-# 注意：fuser 在测试服务器上不可用，改用 pkill
-ssh 152-binwang "cd /home/binwang/cloud_ai_agent && pkill -f cloud-ai-agent; sleep 2; PORT=29080 nohup ./cloud-ai-agent > logs/server.log 2>&1 &"
+# 方式一：SSH 到服务器用 start.sh 重启（推荐）
+ssh 152-binwang "cd /home/binwang/cloud_ai_agent && pkill -f cloud-ai-agent; sleep 2; bash start.sh"
+
+# 方式二：直接远程执行（注意 pkill 找不到进程时会返回非零但不影响）
+ssh 152-binwang "cd /home/binwang/cloud_ai_agent && pkill -f cloud-ai-agent || true; sleep 2; PORT=29080 nohup ./cloud-ai-agent > logs/server.log 2>&1 &"
 ```
+
+### 5. 验证部署
+
+```bash
+# 健康检查
+ssh 152-binwang "curl -s http://localhost:29080/api/health"
+# 预期返回: {"status":"ok"}
+
+# 查看日志
+ssh 152-binwang "tail -20 /home/binwang/cloud_ai_agent/logs/server.log"
+# 预期包含: Database migrated successfully / Server starting on :29080 / DB path: data/cloud_ai_agent.db
+```
+
+## 常见问题排查
+
+### 数据库被覆盖
+
+**现象**：部署后所有实例、Agent 等数据消失，`/api/instances` 返回 `[]`
+
+**原因**：本地 `deploy/data/` 目录下有残留的空数据库文件，SCP 上传时覆盖了服务器数据库
+
+**解决**：
+1. 每次构建前清理 `deploy/data/` 和 `deploy/logs/`
+2. 如有重要数据，部署前先备份：`ssh 152-binwang "cp /home/binwang/cloud_ai_agent/data/cloud_ai_agent.db /tmp/backup.db"`
+
+### start.sh 换行符错误
+
+**现象**：启动时报 `$'\r': 未找到命令`、`没有那个文件或目录`
+
+**原因**：Windows 上编辑的 `start.sh` 使用了 CRLF 换行，且 `DB_PATH` 变量行尾的 `\r` 被带入数据库文件名，导致生成 `cloud_ai_agent.db\r` 这种异常文件
+
+**解决**：在服务器上执行 `sed -i 's/\r$//' start.sh` 修复换行
+
+### 前端 j.prompts is undefined
+
+**现象**：前端报 `Uncaught TypeError: can't access property "length", j.prompts is undefined`
+
+**原因**：`/api/instances/:id/config` 返回错误（如 404）时，`.catch(() => {})` 吞掉了错误，`setInstanceConfig(data)` 将状态替换为不含 `prompts` 字段的错误对象
+
+**修复**：`ChatPage.tsx:117` — `setInstanceConfig` 时对 `prompts`/`skills`/`tools` 做 fallback 默认空数组
 
 ## 环境配置
 
