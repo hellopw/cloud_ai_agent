@@ -6,6 +6,9 @@ WORKDIR /app
 # Configure npm proxy
 RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy http://10.18.34.194:3128
 
+# Install git client
+RUN apk add --no-cache git
+
 # Install Codex packages
 RUN npm init -y && npm install --ignore-scripts @modelcontextprotocol/sdk openai express
 
