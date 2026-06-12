@@ -442,6 +442,84 @@ func (h *Handler) deleteInstance(w http.ResponseWriter, r *http.Request, id stri
 	writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 }
 
+type InstanceConfig struct {
+	Prompts []model.Prompt `json:"prompts"`
+	Skills  []model.Skill  `json:"skills"`
+	Tools   []model.Tool   `json:"tools"`
+}
+
+func (h *Handler) getInstanceConfig(w http.ResponseWriter, r *http.Request, id string) {
+	inst, err := h.store.GetInstance(id)
+	if err != nil || inst == nil {
+		writeError(w, http.StatusNotFound, "instance not found")
+		return
+	}
+
+	cfg := InstanceConfig{
+		Prompts: []model.Prompt{},
+		Skills:  []model.Skill{},
+		Tools:   []model.Tool{},
+	}
+
+	if inst.AgentID != "" {
+		agent, err := h.store.GetAgent(inst.AgentID)
+		if err != nil || agent == nil {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		tmpl, err := h.store.GetTemplate(agent.TemplateID)
+		if err != nil || tmpl == nil {
+			writeError(w, http.StatusNotFound, "template not found")
+			return
+		}
+		for _, pid := range tmpl.PromptIDs {
+			if p, _ := h.store.GetPrompt(pid); p != nil {
+				cfg.Prompts = append(cfg.Prompts, *p)
+			}
+		}
+		for _, sid := range tmpl.SkillIDs {
+			if s, _ := h.store.GetSkill(sid); s != nil {
+				cfg.Skills = append(cfg.Skills, *s)
+			}
+		}
+		for _, tid := range tmpl.ToolIDs {
+			if t, _ := h.store.GetTool(tid); t != nil {
+				cfg.Tools = append(cfg.Tools, *t)
+			}
+		}
+	} else if inst.TeamID != "" {
+		team, err := h.store.GetAgentTeam(inst.TeamID)
+		if err != nil || team == nil {
+			writeError(w, http.StatusNotFound, "team not found")
+			return
+		}
+		for _, pid := range team.PromptIDs {
+			if p, _ := h.store.GetPrompt(pid); p != nil {
+				cfg.Prompts = append(cfg.Prompts, *p)
+			}
+		}
+		for _, sid := range team.SkillIDs {
+			if s, _ := h.store.GetSkill(sid); s != nil {
+				cfg.Skills = append(cfg.Skills, *s)
+			}
+		}
+		for _, m := range team.Members {
+			if m.AgentTemplateID != "" {
+				tmpl, _ := h.store.GetTemplate(m.AgentTemplateID)
+				if tmpl != nil {
+					for _, tid := range tmpl.ToolIDs {
+						if t, _ := h.store.GetTool(tid); t != nil {
+							cfg.Tools = append(cfg.Tools, *t)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, cfg)
+}
+
 // --- Resources ---
 
 func (h *Handler) listResources(w http.ResponseWriter, r *http.Request) {

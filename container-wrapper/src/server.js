@@ -5,7 +5,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { execSync } from "child_process";
+import { listMcpTools, callMcpTool } from "./mcp-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
@@ -15,7 +15,7 @@ const env = new NodeExecutionEnv({ cwd: workspaceDir });
 
 // ---- Built-in tools ----
 
-const tools = [
+const builtinTools = [
   {
     name: "bash",
     description: "Execute a shell command in the workspace. Returns stdout, stderr, and exit code.",
@@ -185,8 +185,69 @@ const tools = [
     },
   },
 ];
+  
+// ---- MCP extension loading ----
+const mcpToolConfigs = {}; // tool_name -> handler config
+const mcpDiscoveredTools = []; // MCP tools with execute callbacks, populated progressively
 
-function setupAgent() {
+function startMcpDiscovery() {
+  const extPath = resolve("/app/extensions/extensions.json");
+  if (!existsSync(extPath)) {
+    console.log("No extensions.json found at", extPath);
+    return;
+  }
+  const extConfigs = JSON.parse(readFileSync(extPath, "utf-8"));
+  console.log(`Starting MCP discovery for ${extConfigs.length} extension configs`);
+
+  const mcpConfigs = extConfigs.filter(cfg => cfg.handler && cfg.handler.type === "mcp");
+  const seen = new Set(builtinTools.map(t => t.name));
+
+  for (const cfg of mcpConfigs) {
+    const h = cfg.handler;
+    listMcpTools({
+      transport: h.transport || "stdio",
+      command: h.command,
+      args: h.args || [],
+      env: h.env || {},
+      url: h.url || "",
+    })
+      .then(tools => {
+        let added = 0;
+        for (const t of tools) {
+          if (seen.has(t.name)) {
+            console.log(`MCP "${cfg.name}": skipping duplicate tool "${t.name}"`);
+            continue;
+          }
+          seen.add(t.name);
+          mcpToolConfigs[t.name] = h;
+          mcpDiscoveredTools.push({
+            name: t.name,
+            description: t.description || "",
+            parameters: t.inputSchema || { type: "object", properties: {} },
+            execute: async (args, { signal }) => {
+              const result = await callMcpTool({
+                transport: h.transport || "stdio",
+                command: h.command,
+                args: h.args || [],
+                env: h.env || {},
+                toolName: t.name,
+                toolArgs: args,
+                signal,
+              });
+              return result;
+            },
+          });
+          added++;
+        }
+        console.log(`MCP "${cfg.name}": added ${added} tools (total MCP: ${mcpDiscoveredTools.length})`);
+      })
+      .catch(err => {
+        console.error(`MCP "${cfg.name}": discovery failed - ${err.message || err}`);
+      });
+  }
+}
+
+function setupAgent(extraTools = []) {
   const provider = process.env.AGENT_PROVIDER || "openai-codex";
   const modelId = process.env.AGENT_MODEL || "gpt-5.1-codex-max";
   const apiKey = process.env.AGENT_API_KEY || process.env.OPENAI_API_KEY || "";
@@ -234,7 +295,7 @@ function setupAgent() {
     },
     initialState: {
       model,
-      tools,
+      tools: [...builtinTools, ...extraTools],
     },
   });
 
@@ -295,7 +356,9 @@ app.post("/chat", async (req, res) => {
   }
 
   if (!agent) {
-    agent = setupAgent();
+    const mcpTools = [...mcpDiscoveredTools];
+    console.log(`Agent init: ${builtinTools.length} builtin + ${mcpTools.length} MCP tools`);
+    agent = setupAgent(mcpTools);
   }
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -399,4 +462,6 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Agent wrapper listening on port ${port}`);
   console.log(`Workspace: ${workspaceDir}`);
+  console.log(`Starting with ${builtinTools.length} builtin tools`);
+  startMcpDiscovery();
 });

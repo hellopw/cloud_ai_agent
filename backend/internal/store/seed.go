@@ -14,7 +14,7 @@ func (s *Store) SeedDefaultTools() error {
 		{
 			name:        "mysql",
 			label:       "MySQL MCP",
-			description: "Connect to a MySQL database via MCP server. Set MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE environment variables.",
+			description: "Connect to a MySQL database via MCP server. Set MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASS, MYSQL_DB environment variables.",
 			dsl: `{
   "name": "mysql",
   "label": "MySQL MCP",
@@ -24,13 +24,13 @@ func (s *Store) SeedDefaultTools() error {
     "type": "mcp",
     "transport": "stdio",
     "command": "npx",
-    "args": ["-y", "@benborber/mysql-mcp-server"],
+    "args": ["-y", "@benborla29/mcp-server-mysql"],
     "env": {
       "MYSQL_HOST": "localhost",
       "MYSQL_PORT": "3306",
       "MYSQL_USER": "root",
-      "MYSQL_PASSWORD": "",
-      "MYSQL_DATABASE": ""
+      "MYSQL_PASS": "",
+      "MYSQL_DB": ""
     }
   }
 }`,
@@ -58,7 +58,7 @@ func (s *Store) SeedDefaultTools() error {
 		{
 			name:        "sqlite",
 			label:       "SQLite MCP",
-			description: "Interact with a local SQLite database via MCP server. Set SQLITE_DB_PATH to the database file path.",
+			description: "Interact with a local SQLite database via MCP server. Set SQLITE_PATH to the database file path.",
 			dsl: `{
   "name": "sqlite",
   "label": "SQLite MCP",
@@ -68,9 +68,9 @@ func (s *Store) SeedDefaultTools() error {
     "type": "mcp",
     "transport": "stdio",
     "command": "npx",
-    "args": ["-y", "@nicholaschen/sqlite-mcp-server"],
+    "args": ["-y", "@easy-mcps/sqlite-mcp-server"],
     "env": {
-      "SQLITE_DB_PATH": "./data.db"
+      "SQLITE_PATH": "./data.db"
     }
   }
 }`,
@@ -88,7 +88,7 @@ func (s *Store) SeedDefaultTools() error {
     "type": "mcp",
     "transport": "stdio",
     "command": "npx",
-    "args": ["-y", "@hxrxchang/redis-mcp-server"],
+    "args": ["-y", "@easy-mcps/redis-mcp-server"],
     "env": {
       "REDIS_URL": "redis://localhost:6379"
     }
@@ -98,7 +98,7 @@ func (s *Store) SeedDefaultTools() error {
 		{
 			name:        "mongodb",
 			label:       "MongoDB MCP",
-			description: "Connect to a MongoDB instance via MCP server. Set MONGODB_URI environment variable (e.g. mongodb://localhost:27017/dbname).",
+			description: "Connect to a MongoDB instance via MCP server. Set MDB_MCP_CONNECTION_STRING environment variable (e.g. mongodb://localhost:27017/dbname).",
 			dsl: `{
   "name": "mongodb",
   "label": "MongoDB MCP",
@@ -108,9 +108,9 @@ func (s *Store) SeedDefaultTools() error {
     "type": "mcp",
     "transport": "stdio",
     "command": "npx",
-    "args": ["-y", "@belencode/mongo-mcp-server"],
+    "args": ["-y", "mongodb-mcp-server"],
     "env": {
-      "MONGODB_URI": "mongodb://localhost:27017/dbname"
+      "MDB_MCP_CONNECTION_STRING": "mongodb://localhost:27017/dbname"
     }
   }
 }`,

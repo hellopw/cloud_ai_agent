@@ -4,13 +4,14 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
+import { listMcpTools, callMcpTool } from "./mcp-client.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
 fs.mkdirSync(workspaceDir, { recursive: true });
 
 // ---- Built-in tools ----
-const tools = [
+const builtinTools = [
   {
     name: "bash",
     description: "Execute a shell command in the workspace. Returns stdout, stderr, and exit code.",
@@ -95,7 +96,58 @@ const tools = [
   },
 ];
 
-// Tool execution
+// ---- MCP extension loading ----
+const mcpToolConfigs = {}; // tool_name -> handler config
+let allTools = [...builtinTools]; // start with builtins, MCP added progressively
+
+function startMcpDiscovery() {
+  const extPath = path.resolve("/app/extensions/extensions.json");
+  if (!fs.existsSync(extPath)) {
+    console.log("No extensions.json found at", extPath);
+    return;
+  }
+  const extConfigs = JSON.parse(fs.readFileSync(extPath, "utf-8"));
+  console.log(`Starting MCP discovery for ${extConfigs.length} extension configs`);
+
+  const mcpConfigs = extConfigs.filter(cfg => cfg.handler && cfg.handler.type === "mcp");
+  const seen = new Set(builtinTools.map(t => t.name));
+
+  // Discover each MCP server independently – tools are added as they arrive
+  for (const cfg of mcpConfigs) {
+    listMcpTools({
+      transport: cfg.handler.transport || "stdio",
+      command: cfg.handler.command,
+      args: cfg.handler.args || [],
+      env: cfg.handler.env || {},
+      url: cfg.handler.url || "",
+    })
+      .then(tools => {
+        let added = 0;
+        for (const t of tools) {
+          if (seen.has(t.name)) {
+            console.log(`MCP "${cfg.name}": skipping duplicate tool "${t.name}"`);
+            continue;
+          }
+          seen.add(t.name);
+          mcpToolConfigs[t.name] = cfg.handler;
+          allTools.push({
+            name: t.name,
+            description: t.description || "",
+            input_schema: t.inputSchema || { type: "object", properties: {} },
+          });
+          added++;
+        }
+        console.log(`MCP "${cfg.name}": added ${added} tools (total: ${allTools.length})`);
+      })
+      .catch(err => {
+        console.error(`MCP "${cfg.name}": discovery failed - ${err.message || err}`);
+      });
+  }
+}
+
+function getTools() {
+  return allTools;
+}
 async function executeTool(name, input) {
   switch (name) {
     case "bash": {
@@ -160,6 +212,26 @@ async function executeTool(name, input) {
       }
     }
     default:
+      // Route to MCP if registered
+      if (mcpToolConfigs[name]) {
+        const cfg = mcpToolConfigs[name];
+        try {
+          const result = await callMcpTool({
+            transport: cfg.transport || "stdio",
+            command: cfg.command,
+            args: cfg.args || [],
+            env: cfg.env || {},
+            toolName: name,
+            toolArgs: input,
+          });
+          if (result.isError) {
+            return `MCP error: ${result.content?.[0]?.text || JSON.stringify(result)}`;
+          }
+          return result.content?.map(c => c.text).join("\n") || JSON.stringify(result);
+        } catch (e) {
+          return `MCP tool "${name}" error: ${e.message}`;
+        }
+      }
       return `Unknown tool: ${name}`;
   }
 }
@@ -231,12 +303,10 @@ app.post("/chat", async (req, res) => {
         max_tokens: 16000,
         system: "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.",
         messages,
-        tools,
+        tools: getTools(),
       });
 
-      let toolUseBlocks = [];
-      let currentThinking = "";
-      let currentText = "";
+      let contentBlocks = []; // { index, type, id, name, input }
 
       for await (const event of stream) {
         switch (event.type) {
@@ -244,13 +314,19 @@ app.post("/chat", async (req, res) => {
             sendEvent("message_start", event.message);
             break;
           case "content_block_start":
-            if (event.content_block.type === "tool_use") {
-              toolUseBlocks.push({ id: event.content_block.id, name: event.content_block.name, input: "" });
-            }
+            contentBlocks.push({
+              index: event.index,
+              type: event.content_block.type,
+              id: event.content_block.id,
+              name: event.content_block.name,
+              input: "",
+            });
             break;
-          case "content_block_delta":
+          case "content_block_delta": {
+            const block = contentBlocks.find(b => b.index === event.index);
+            if (!block) break;
             if (event.delta.type === "thinking_delta") {
-              currentThinking += event.delta.thinking;
+              block.input += event.delta.thinking;
               sendEvent("message_update", {
                 assistantMessageEvent: {
                   type: "thinking_delta",
@@ -258,7 +334,7 @@ app.post("/chat", async (req, res) => {
                 },
               });
             } else if (event.delta.type === "text_delta") {
-              currentText += event.delta.text;
+              block.input += event.delta.text;
               sendEvent("message_update", {
                 assistantMessageEvent: {
                   type: "text_delta",
@@ -266,12 +342,12 @@ app.post("/chat", async (req, res) => {
                 },
               });
             } else if (event.delta.type === "input_json_delta") {
-              const block = toolUseBlocks.find(b => b.id === event.index);
-              if (block && event.delta.partial_json) {
+              if (event.delta.partial_json) {
                 block.input += event.delta.partial_json;
               }
             }
             break;
+          }
           case "content_block_stop":
             break;
           case "message_delta":
@@ -282,18 +358,39 @@ app.post("/chat", async (req, res) => {
         }
       }
 
+      let toolUses = [];
+      let assistantContent = [];
       const finalMessage = stream.finalMessage();
-      if (!finalMessage) break;
+      if (finalMessage && finalMessage.content) {
+        assistantContent = finalMessage.content;
+        toolUses = finalMessage.content.filter(c => c.type === "tool_use");
+      }
 
-      // Always add the assistant message so it can be persisted
-      messages.push({ role: "assistant", content: finalMessage.content });
+      // Fallback: reconstruct from accumulated streaming blocks if finalMessage lacks tool_use
+      if (toolUses.length === 0) {
+        const streamToolUses = contentBlocks.filter(b => b.type === "tool_use" && b.name);
+        if (streamToolUses.length > 0) {
+          assistantContent = contentBlocks.map(b => {
+            if (b.type === "tool_use") {
+              let parsedInput = {};
+              try { parsedInput = JSON.parse(b.input || "{}"); } catch (_) {}
+              return { type: "tool_use", id: b.id, name: b.name, input: parsedInput };
+            }
+            if (b.type === "text") return { type: "text", text: b.input };
+            if (b.type === "thinking") return { type: "thinking", thinking: b.input };
+            return null;
+          }).filter(Boolean);
+          toolUses = assistantContent.filter(c => c.type === "tool_use");
+        }
+      }
 
-      // Check for tool use
-      const toolUses = finalMessage.content.filter(c => c.type === "tool_use");
       if (toolUses.length === 0) {
         // No more tools, agent is done
         break;
       }
+
+      // Add assistant message with tool uses
+      messages.push({ role: "assistant", content: assistantContent });
 
       // Execute tools and add results
       const toolResults = [];
@@ -317,9 +414,7 @@ app.post("/chat", async (req, res) => {
       messages.push({ role: "user", content: toolResults });
     }
 
-    // Include full message history so the frontend can persist assistant
-    // replies even when streamingBlocksRef is empty on agent_end.
-    sendEvent("agent_end", { stopReason: "end_turn", messages });
+    sendEvent("agent_end", { stopReason: "end_turn" });
   } catch (err) {
     sendEvent("error", { message: err.message });
   } finally {
@@ -337,4 +432,6 @@ app.listen(port, () => {
   console.log(`Claude Code wrapper listening on port ${port}`);
   console.log(`Workspace: ${workspaceDir}`);
   console.log(`Model: ${model}`);
+  console.log(`Starting with ${builtinTools.length} builtin tools`);
+  startMcpDiscovery();
 });

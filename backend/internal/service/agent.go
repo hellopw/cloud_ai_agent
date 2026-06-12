@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -146,22 +146,50 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 
 func (svc *AgentService) writeToolExtensions(buildDir string, toolIDs []string) error {
 	extDir := filepath.Join(buildDir, "extensions")
-	if err := os.MkdirAll(extDir, 0755); err != nil {
-		return err
+	if err := os.MkdirAll(extDir, 0755); err != nil { return err }
+	if len(toolIDs) == 0 { return nil }
+
+	type extEntry struct {
+		Name        string          `json:"name"`
+		Label       string          `json:"label"`
+		Description string          `json:"description"`
+		Parameters  json.RawMessage `json:"parameters"`
+		Handler     json.RawMessage `json:"handler"`
 	}
-	if len(toolIDs) == 0 {
-		return nil
-	}
+	var manifest []extEntry
+
 	for _, tid := range toolIDs {
 		tool, err := svc.store.GetTool(tid)
-		if err != nil {
-			continue
-		}
+		if err != nil { continue }
 		tsCode, err := codegen.GenerateToolExtension(tool.DSLDefinition)
-		if err != nil {
-			continue
+		if err != nil { continue }
+		if err := os.WriteFile(filepath.Join(extDir, tool.Name+".ts"), []byte(tsCode), 0644); err != nil { return err }
+
+		// Parse DSL to build manifest entry
+		var dsl struct {
+			Name        string          `json:"name"`
+			Label       string          `json:"label"`
+			Description string          `json:"description"`
+			Parameters  json.RawMessage `json:"parameters"`
+			Handler     json.RawMessage `json:"handler"`
 		}
-		if err := os.WriteFile(filepath.Join(extDir, tool.Name+".ts"), []byte(tsCode), 0644); err != nil {
+		if json.Unmarshal([]byte(tool.DSLDefinition), &dsl) == nil {
+			var h struct{ Type string `json:"type"` }
+			if json.Unmarshal(dsl.Handler, &h) == nil && h.Type == "mcp" {
+				manifest = append(manifest, extEntry{
+					Name:        dsl.Name,
+					Label:       dsl.Label,
+					Description: dsl.Description,
+					Parameters:  dsl.Parameters,
+					Handler:     dsl.Handler,
+				})
+			}
+		}
+	}
+
+	if len(manifest) > 0 {
+		manifestJSON, _ := json.Marshal(manifest)
+		if err := os.WriteFile(filepath.Join(extDir, "extensions.json"), manifestJSON, 0644); err != nil {
 			return err
 		}
 	}
@@ -174,9 +202,7 @@ func (svc *AgentService) writePromptsSkills(buildDir string, promptIDs, skillIDs
 	if len(promptIDs) > 0 {
 		for _, pid := range promptIDs {
 			p, err := svc.store.GetPrompt(pid)
-			if err != nil || p == nil {
-				continue
-			}
+			if err != nil || p == nil { continue }
 			content := fmt.Sprintf("---\ndescription: %s\n---\n\n%s", p.Description, p.Content)
 			os.WriteFile(filepath.Join(promptsDir, p.Name+".md"), []byte(content), 0644)
 		}
@@ -186,9 +212,7 @@ func (svc *AgentService) writePromptsSkills(buildDir string, promptIDs, skillIDs
 	if len(skillIDs) > 0 {
 		for _, sid := range skillIDs {
 			s, err := svc.store.GetSkill(sid)
-			if err != nil || s == nil {
-				continue
-			}
+			if err != nil || s == nil { continue }
 			content := fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s", s.Name, s.Description, s.Content)
 			os.WriteFile(filepath.Join(skillsDir, s.Name+".md"), []byte(content), 0644)
 		}
@@ -198,17 +222,11 @@ func (svc *AgentService) writePromptsSkills(buildDir string, promptIDs, skillIDs
 
 func (svc *AgentService) StartInstance(ctx context.Context, agentID, providerConfigID string) (*model.Instance, error) {
 	agent, err := svc.store.GetAgent(agentID)
-	if err != nil || agent == nil {
-		return nil, fmt.Errorf("agent not found")
-	}
-	if agent.Status != "ready" {
-		return nil, fmt.Errorf("agent not ready: %s", agent.Status)
-	}
+	if err != nil || agent == nil { return nil, fmt.Errorf("agent not found") }
+	if agent.Status != "ready" { return nil, fmt.Errorf("agent not ready: %s", agent.Status) }
 
 	instance := &model.Instance{AgentID: agentID}
-	if err := svc.store.CreateInstance(instance); err != nil {
-		return nil, err
-	}
+	if err := svc.store.CreateInstance(instance); err != nil { return nil, err }
 
 	port := svc.findFreePort(instance.ID)
 	containerName := fmt.Sprintf("cloud-agent-%s", instance.ID[:12])
@@ -364,53 +382,80 @@ func (svc *AgentService) BuildAgentTeam(ctx context.Context, teamID string) erro
 		seenSkills := make(map[string]bool)
 
 		for _, pid := range team.PromptIDs {
-			if !seenPrompts[pid] {
-				memberPromptIDs = append(memberPromptIDs, pid)
-				seenPrompts[pid] = true
-			}
+			if !seenPrompts[pid] { memberPromptIDs = append(memberPromptIDs, pid); seenPrompts[pid] = true }
 		}
 		for _, pid := range m.PromptIDs {
-			if !seenPrompts[pid] {
-				memberPromptIDs = append(memberPromptIDs, pid)
-				seenPrompts[pid] = true
-			}
+			if !seenPrompts[pid] { memberPromptIDs = append(memberPromptIDs, pid); seenPrompts[pid] = true }
 		}
 		for _, sid := range team.SkillIDs {
-			if !seenSkills[sid] {
-				memberSkillIDs = append(memberSkillIDs, sid)
-				seenSkills[sid] = true
-			}
+			if !seenSkills[sid] { memberSkillIDs = append(memberSkillIDs, sid); seenSkills[sid] = true }
 		}
 		for _, sid := range m.SkillIDs {
-			if !seenSkills[sid] {
-				memberSkillIDs = append(memberSkillIDs, sid)
-				seenSkills[sid] = true
-			}
+			if !seenSkills[sid] { memberSkillIDs = append(memberSkillIDs, sid); seenSkills[sid] = true }
 		}
 
 		extDir := filepath.Join(memberDir, "extensions")
 		os.MkdirAll(extDir, 0755)
+
+		type memberExtEntry struct {
+			Name        string          `json:"name"`
+			Label       string          `json:"label"`
+			Description string          `json:"description"`
+			Parameters  json.RawMessage `json:"parameters"`
+			Handler     json.RawMessage `json:"handler"`
+		}
+		var memberExtManifest []memberExtEntry
+
 		for _, tid := range tmpl.ToolIDs {
 			tool, err := svc.store.GetTool(tid)
-			if err != nil {
-				continue
-			}
+			if err != nil { continue }
 			tsCode, err := codegen.GenerateToolExtension(tool.DSLDefinition)
-			if err != nil {
-				continue
-			}
+			if err != nil { continue }
 			os.WriteFile(filepath.Join(extDir, tool.Name+".ts"), []byte(tsCode), 0644)
+			var dsl struct {
+				Name        string          `json:"name"`
+				Label       string          `json:"label"`
+				Description string          `json:"description"`
+				Parameters  json.RawMessage `json:"parameters"`
+				Handler     json.RawMessage `json:"handler"`
+			}
+			if json.Unmarshal([]byte(tool.DSLDefinition), &dsl) == nil {
+				var h struct{ Type string `json:"type"` }
+				if json.Unmarshal(dsl.Handler, &h) == nil && h.Type == "mcp" {
+					memberExtManifest = append(memberExtManifest, memberExtEntry{
+						Name: dsl.Name, Label: dsl.Label, Description: dsl.Description,
+						Parameters: dsl.Parameters, Handler: dsl.Handler,
+					})
+				}
+			}
 		}
 		for _, tid := range m.ToolIDs {
 			tool, err := svc.store.GetTool(tid)
-			if err != nil {
-				continue
-			}
+			if err != nil { continue }
 			tsCode, err := codegen.GenerateToolExtension(tool.DSLDefinition)
-			if err != nil {
-				continue
-			}
+			if err != nil { continue }
 			os.WriteFile(filepath.Join(extDir, tool.Name+".ts"), []byte(tsCode), 0644)
+			var dsl struct {
+				Name        string          `json:"name"`
+				Label       string          `json:"label"`
+				Description string          `json:"description"`
+				Parameters  json.RawMessage `json:"parameters"`
+				Handler     json.RawMessage `json:"handler"`
+			}
+			if json.Unmarshal([]byte(tool.DSLDefinition), &dsl) == nil {
+				var h struct{ Type string `json:"type"` }
+				if json.Unmarshal(dsl.Handler, &h) == nil && h.Type == "mcp" {
+					memberExtManifest = append(memberExtManifest, memberExtEntry{
+						Name: dsl.Name, Label: dsl.Label, Description: dsl.Description,
+						Parameters: dsl.Parameters, Handler: dsl.Handler,
+					})
+				}
+			}
+		}
+
+		if len(memberExtManifest) > 0 {
+			manifestJSON, _ := json.Marshal(memberExtManifest)
+			os.WriteFile(filepath.Join(extDir, "extensions.json"), manifestJSON, 0644)
 		}
 
 		svc.writePromptsSkills(memberDir, memberPromptIDs, memberSkillIDs)
@@ -498,17 +543,11 @@ func (svc *AgentService) findFreePort(instanceID string) int {
 
 func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (*model.Instance, error) {
 	team, err := svc.store.GetAgentTeam(teamID)
-	if err != nil || team == nil {
-		return nil, fmt.Errorf("team not found")
-	}
-	if team.Status != "ready" {
-		return nil, fmt.Errorf("team not ready: %s", team.Status)
-	}
+	if err != nil || team == nil { return nil, fmt.Errorf("team not found") }
+	if team.Status != "ready" { return nil, fmt.Errorf("team not ready: %s", team.Status) }
 
 	instance := &model.Instance{AgentID: "", TeamID: teamID}
-	if err := svc.store.CreateInstance(instance); err != nil {
-		return nil, err
-	}
+	if err := svc.store.CreateInstance(instance); err != nil { return nil, err }
 
 	port := svc.findFreePort(instance.ID)
 	containerName := fmt.Sprintf("cloud-agent-team-%s", instance.ID[:12])
@@ -533,3 +572,4 @@ func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (
 
 	return instance, nil
 }
+

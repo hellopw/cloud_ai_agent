@@ -62,7 +62,7 @@ function startStdioServer(command, args = [], env = {}) {
     proc.stdin.write(JSON.stringify(notif) + "\n");
   }
 
-  async function send(method, params = {}, timeoutMs = 30000) {
+  async function send(method, params = {}, timeoutMs = 120000) {
     if (closed) throw new Error("MCP server process has closed");
     const req = createRequest(method, params);
     proc.stdin.write(JSON.stringify(req) + "\n");
@@ -101,7 +101,7 @@ function startStdioServer(command, args = [], env = {}) {
 
 // ---- SSE transport ----
 
-async function startSSEClient(url, timeoutMs = 30000) {
+async function startSSEClient(url, timeoutMs = 120000) {
   const initResp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -25,14 +25,17 @@ func HandleChatHTTP(containerHost string, containerPort int) http.HandlerFunc {
 			Message string `json:"message"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+			log.Printf("chat-http: bad request, decode error: %v", err)
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 		if msg.Message == "" {
+			log.Printf("chat-http: bad request, empty message")
 			http.Error(w, "empty message", http.StatusBadRequest)
 			return
 		}
 
+		log.Printf("chat-http: proxying to %s/chat message_len=%d", containerURL, len(msg.Message))
 		reqBody, _ := json.Marshal(map[string]string{"message": msg.Message})
 		resp, err := proxyClient.Post(containerURL+"/chat", "application/json", bytes.NewReader(reqBody))
 		if err != nil {

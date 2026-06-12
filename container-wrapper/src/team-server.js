@@ -5,6 +5,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { listMcpTools, callMcpTool } from "./mcp-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
@@ -185,6 +186,74 @@ function buildBuiltinTools() {
       },
     },
   ];
+}
+
+// ---- MCP extension loading per member ----
+
+const mcpToolsCache = {};   // memberName -> tools array (populated progressively)
+const mcpConfigCache = {};  // memberName -> { toolName: handlerConfig }
+
+function startMcpDiscoveryForMember(memberName) {
+  const extPath = resolve(`/app/agents/${memberName}/extensions/extensions.json`);
+  if (!existsSync(extPath)) {
+    console.log(`No extensions.json for member "${memberName}" at ${extPath}`);
+    mcpToolsCache[memberName] = [];
+    mcpConfigCache[memberName] = {};
+    return;
+  }
+  const extConfigs = JSON.parse(readFileSync(extPath, "utf-8"));
+  console.log(`[${memberName}] Starting MCP discovery for ${extConfigs.length} extension configs`);
+
+  const mcpConfigs = extConfigs.filter(cfg => cfg.handler && cfg.handler.type === "mcp");
+  const seen = new Set();
+  const memberTools = [];
+  const memberConfigs = {};
+  mcpToolsCache[memberName] = memberTools;
+  mcpConfigCache[memberName] = memberConfigs;
+
+  for (const cfg of mcpConfigs) {
+    const h = cfg.handler;
+    listMcpTools({
+      transport: h.transport || "stdio",
+      command: h.command,
+      args: h.args || [],
+      env: h.env || {},
+      url: h.url || "",
+    })
+      .then(tools => {
+        let added = 0;
+        for (const t of tools) {
+          if (seen.has(t.name)) {
+            console.log(`[${memberName}] MCP "${cfg.name}": skipping duplicate tool "${t.name}"`);
+            continue;
+          }
+          seen.add(t.name);
+          memberConfigs[t.name] = h;
+          memberTools.push({
+            name: t.name,
+            description: t.description || "",
+            parameters: t.inputSchema || { type: "object", properties: {} },
+            execute: async (args, { signal }) => {
+              const result = await callMcpTool({
+                transport: h.transport || "stdio",
+                command: h.command,
+                args: h.args || [],
+                env: h.env || {},
+                toolName: t.name,
+                toolArgs: args,
+                signal,
+              });
+              return result;
+            },
+          });
+          added++;
+        }
+        console.log(`[${memberName}] MCP "${cfg.name}": added ${added} tools (total: ${memberTools.length})`);
+      })
+      .catch(err => {
+        console.error(`[${memberName}] MCP "${cfg.name}": discovery failed - ${err.message || err}`);
+      });
+  }
 }
 
 // ---- Agent setup per member ----
@@ -370,7 +439,7 @@ app.use(express.json({ limit: "10mb" }));
 
 // Lazy leader init
 let leaderAgent = null;
-function getLeaderAgent() {
+async function getLeaderAgent() {
   if (!leaderAgent) {
     for (const member of manifest.members) {
       if (member.role === "leader") {
@@ -383,20 +452,29 @@ function getLeaderAgent() {
       leaderName = manifest.members[0]?.name;
     }
 
-    leaderAgent = setupAgent(memberConfigs[leaderName], [getDelegateTool()]);
+    const mcpTools = mcpToolsCache[leaderName] || [];
+    leaderAgent = setupAgent(memberConfigs[leaderName], [getDelegateTool(), ...mcpTools]);
     agents[leaderName] = leaderAgent;
-    console.log(`Leader agent "${leaderName}" initialized`);
+    console.log(`Leader agent "${leaderName}" initialized with ${mcpTools.length} MCP tools`);
   }
   return leaderAgent;
 }
 
-// Initialize workers eagerly
+// Start MCP discovery for all members (non-blocking)
 for (const member of manifest.members) {
-  if (member.role !== "leader") {
-    agents[member.name] = setupAgent(memberConfigs[member.name]);
-    console.log(`Worker agent "${member.name}" initialized`);
-  }
+  startMcpDiscoveryForMember(member.name);
 }
+
+// Initialize workers eagerly (async)
+(async () => {
+  for (const member of manifest.members) {
+    if (member.role !== "leader") {
+      const mcpTools = mcpToolsCache[member.name] || [];
+      agents[member.name] = setupAgent(memberConfigs[member.name], mcpTools);
+      console.log(`Worker agent "${member.name}" initialized with ${mcpTools.length} MCP tools`);
+    }
+  }
+})();
 
 app.get("/status", (req, res) => {
   const statuses = manifest.members.map((m) => ({
@@ -421,7 +499,7 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "message required" });
   }
 
-  const leader = getLeaderAgent();
+  const leader = await getLeaderAgent();
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
