@@ -43,6 +43,10 @@ func main() {
 		log.Printf("Warning: seed default tools: %v", err)
 	}
 
+	if err := s.SeedExampleAgents(); err != nil {
+		log.Printf("Warning: seed example agents: %v", err)
+	}
+
 	h := api.NewHandler(s)
 	agentSvc := service.NewAgentService(s)
 	h.WithAgentService(agentSvc)
