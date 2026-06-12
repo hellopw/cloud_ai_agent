@@ -231,6 +231,10 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID, providerCon
 	port := svc.findFreePort(instance.ID)
 	containerName := fmt.Sprintf("cloud-agent-%s", instance.ID[:12])
 
+	// Create log directory for this instance
+	logDir := filepath.Join(svc.projectRoot, "builds", agentID, "llm-logs", instance.ID)
+	os.MkdirAll(logDir, 0777)
+
 	go func() {
 		ctx := context.Background()
 		env := map[string]string{
@@ -238,6 +242,8 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID, providerCon
 			"AGENT_MODEL":    os.Getenv("AGENT_MODEL"),
 			"AGENT_API_KEY":  os.Getenv("AGENT_API_KEY"),
 			"AGENT_BASE_URL": os.Getenv("AGENT_BASE_URL"),
+			"LOGS_DIR":       "/logs",
+			"INSTANCE_ID":    instance.ID,
 		}
 		// Provider config from request overrides env vars
 		if providerConfigID != "" {
@@ -254,8 +260,9 @@ func (svc *AgentService) StartInstance(ctx context.Context, agentID, providerCon
 			}
 		}
 		repoAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", agentID, "repo"))
+		logAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", agentID, "llm-logs"))
 		_, err := svc.docker.RunContainer(ctx, agent.ImageTag, containerName,
-			repoAbs, port, env)
+			repoAbs, logAbs, port, env)
 		if err != nil {
 			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0, err.Error())
 			return
@@ -552,6 +559,10 @@ func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (
 	port := svc.findFreePort(instance.ID)
 	containerName := fmt.Sprintf("cloud-agent-team-%s", instance.ID[:12])
 
+	// Create log directory for this instance
+	logDir := filepath.Join(svc.projectRoot, "builds", teamID, "llm-logs", instance.ID)
+	os.MkdirAll(logDir, 0777)
+
 	go func() {
 		ctx := context.Background()
 		env := map[string]string{
@@ -559,10 +570,13 @@ func (svc *AgentService) StartTeamInstance(ctx context.Context, teamID string) (
 			"AGENT_MODEL":    os.Getenv("AGENT_MODEL"),
 			"AGENT_API_KEY":  os.Getenv("AGENT_API_KEY"),
 			"AGENT_BASE_URL": os.Getenv("AGENT_BASE_URL"),
+			"LOGS_DIR":       "/logs",
+			"INSTANCE_ID":    instance.ID,
 		}
 		repoAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", teamID, "repo"))
+		logAbs, _ := filepath.Abs(filepath.Join(svc.projectRoot, "builds", teamID, "llm-logs"))
 		_, err := svc.docker.RunContainer(ctx, team.ImageTag, containerName,
-			repoAbs, port, env)
+			repoAbs, logAbs, port, env)
 		if err != nil {
 			svc.store.UpdateInstanceStatus(instance.ID, "error", "", 0, err.Error())
 			return

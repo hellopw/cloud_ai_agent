@@ -73,7 +73,7 @@ COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
-RUN mkdir -p /workspace
+RUN mkdir -p /workspace /logs
 
 {{if .CustomContent}}{{.CustomContent}}{{end}}
 
@@ -103,7 +103,7 @@ COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
-RUN mkdir -p /workspace
+RUN mkdir -p /workspace /logs
 
 {{if .CustomContent}}{{.CustomContent}}{{end}}
 
@@ -133,7 +133,7 @@ COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
-RUN mkdir -p /workspace
+RUN mkdir -p /workspace /logs
 
 {{if .CustomContent}}{{.CustomContent}}{{end}}
 
@@ -168,7 +168,7 @@ COPY team-server.js ./server.js
 {{if .TeamSkillsDir}}COPY {{.TeamSkillsDir}}/ ./team-skills/{{end}}
 
 # Work directory for code repos (bind-mounted at runtime)
-RUN mkdir -p /workspace
+RUN mkdir -p /workspace /logs
 
 {{if .CustomContent}}{{.CustomContent}}{{end}}
 

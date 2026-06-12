@@ -35,12 +35,13 @@ func (s *Service) BuildImage(ctx context.Context, buildDir, imageTag string, log
 	return cmd.Run()
 }
 
-func (s *Service) RunContainer(ctx context.Context, imageTag, containerName, repoPath string, port int, envVars map[string]string) (string, error) {
+func (s *Service) RunContainer(ctx context.Context, imageTag, containerName, repoPath, logDir string, port int, envVars map[string]string) (string, error) {
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
 		"-p", fmt.Sprintf("%d:3000", port),
 		"-v", fmt.Sprintf("%s:/workspace", repoPath),
+		"-v", fmt.Sprintf("%s:/logs", logDir),
 		"-e", fmt.Sprintf("WORKSPACE_DIR=/workspace"),
 	}
 

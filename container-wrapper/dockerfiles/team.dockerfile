@@ -23,8 +23,8 @@ COPY team-server.js ./server.js
 {{if .TeamPromptsDir}}COPY {{.TeamPromptsDir}}/ ./team-prompts/{{end}}
 {{if .TeamSkillsDir}}COPY {{.TeamSkillsDir}}/ ./team-skills/{{end}}
 
-# Work directory for code repos (bind-mounted at runtime)
-RUN mkdir -p /workspace
+# Work directory for code repos and logs (mounted at runtime)
+RUN mkdir -p /workspace /logs
 
 {{if .CustomContent}}{{.CustomContent}}{{end}}
 

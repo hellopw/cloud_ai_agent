@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"net/http"
-	"log"
 	"strings"
 
 	"cloud_ai_agent/internal/proxy"
@@ -164,16 +163,12 @@ func NewRouter(h *Handler) http.Handler {
 		}
 		if strings.HasSuffix(path, "/chat-http") {
 			id := strings.TrimSuffix(path, "/chat-http")
-			port := h.getInstancePort(id)
-			log.Printf("router: chat-http id=%s port=%d", id, port)
-			proxy.HandleChatHTTP("localhost", port)(w, r)
+			proxy.HandleChatHTTP("localhost", h.getInstancePort(id))(w, r)
 			return
 		}
 		if strings.HasSuffix(path, "/chat") {
 			id := strings.TrimSuffix(path, "/chat")
-			port := h.getInstancePort(id)
-			log.Printf("router: chat id=%s port=%d", id, port)
-			proxy.HandleChat("localhost", port)(w, r)
+			proxy.HandleChat("localhost", h.getInstancePort(id))(w, r)
 			return
 		}
 		if strings.HasSuffix(path, "/messages") {
@@ -185,11 +180,23 @@ func NewRouter(h *Handler) http.Handler {
 			}
 			return
 		}
-			if strings.HasSuffix(path, "/config") {
-				id := strings.TrimSuffix(path, "/config")
-				if r.Method == "GET" { h.getInstanceConfig(w, r, id) } else { methodNotAllowed(w) }
-				return
+		if strings.HasSuffix(path, "/llm-logs") {
+			rest := strings.TrimSuffix(path, "/llm-logs")
+			// /api/instances/<id>/llm-logs/<filename>
+			if strings.HasPrefix(rest, "/") {
+				parts := strings.SplitN(strings.TrimPrefix(rest, "/"), "/", 2)
+				if len(parts) == 2 && parts[1] != "" {
+					h.getLLMLogFile(w, r, parts[0], parts[1])
+					return
+				}
+				if len(parts) == 1 {
+					h.listLLMLogs(w, r, parts[0])
+					return
+				}
 			}
+			writeError(w, http.StatusBadRequest, "invalid llm-logs path")
+			return
+		}
 		switch r.Method {
 		case "GET": h.getInstance(w, r, path)
 		case "DELETE": h.deleteInstance(w, r, path)

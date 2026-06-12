@@ -65,6 +65,17 @@ export const instancesApi = {
   list: () => request('/instances'),
   get: (id: string) => request(`/instances/${id}`),
   delete: (id: string) => request(`/instances/${id}`, { method: 'DELETE' }),
+  llmLogs: (id: string) => request(`/instances/${id}/llm-logs`),
+}
+
+// Raw text fetcher for log file content (returns text, not JSON)
+export async function fetchText(path: string): Promise<string> {
+  const res = await fetch('/api' + path)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || res.statusText)
+  }
+  return res.text()
 }
 
 export const providerConfigsApi = {

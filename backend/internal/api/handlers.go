@@ -3,10 +3,14 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 
 	"cloud_ai_agent/internal/model"
 	"github.com/google/uuid"
@@ -869,4 +873,128 @@ func (h *Handler) createChatMessage(w http.ResponseWriter, r *http.Request, inst
 		return
 	}
 	writeJSON(w, http.StatusCreated, msg)
+}
+
+// --- LLM Logs ---
+
+var safeFilenameRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+
+func (h *Handler) getLLMLogDir(instanceID string) (string, error) {
+	inst, err := h.store.GetInstance(instanceID)
+	if err != nil || inst == nil {
+		return "", fmt.Errorf("instance not found")
+	}
+	projectRoot := os.Getenv("PROJECT_ROOT")
+	if projectRoot == "" {
+		projectRoot = ".."
+	}
+	targetID := inst.AgentID
+	if targetID == "" {
+		targetID = inst.TeamID
+	}
+	return filepath.Join(projectRoot, "builds", targetID, "llm-logs", instanceID), nil
+}
+
+func (h *Handler) listLLMLogs(w http.ResponseWriter, r *http.Request, instanceID string) {
+	logDir, err := h.getLLMLogDir(instanceID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "llm logs not found")
+		return
+	}
+
+	type fileInfo struct {
+		Name string `json:"name"`
+		Size int64  `json:"size"`
+	}
+
+	var files []fileInfo
+	// Also scan subdirectories (for team mode: leader/, worker1/, etc.)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			subEntries, err := os.ReadDir(filepath.Join(logDir, entry.Name()))
+			if err != nil {
+				continue
+			}
+			for _, sub := range subEntries {
+				if !sub.IsDir() {
+					info, _ := sub.Info()
+					files = append(files, fileInfo{
+						Name: entry.Name() + "/" + sub.Name(),
+						Size: info.Size(),
+					})
+				}
+			}
+		} else {
+			info, _ := entry.Info()
+			files = append(files, fileInfo{
+				Name: entry.Name(),
+				Size: info.Size(),
+			})
+		}
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name < files[j].Name
+	})
+
+	if r.Method == "GET" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"files": files})
+	} else {
+		methodNotAllowed(w)
+	}
+}
+
+func (h *Handler) getLLMLogFile(w http.ResponseWriter, r *http.Request, instanceID, filename string) {
+	if r.Method != "GET" {
+		methodNotAllowed(w)
+		return
+	}
+
+	logDir, err := h.getLLMLogDir(instanceID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+
+	// Allow subdirectory (e.g. "leader/request-0001.jsonl")
+	cleaned := filepath.Clean(filename)
+	parts := strings.SplitN(cleaned, "/", 2)
+	for _, part := range parts {
+		if !safeFilenameRe.MatchString(part) {
+			writeError(w, http.StatusBadRequest, "invalid filename")
+			return
+		}
+	}
+
+	fullPath := filepath.Join(logDir, cleaned)
+	// Security: verify path is within logDir
+	absPath, _ := filepath.Abs(fullPath)
+	absLogDir, _ := filepath.Abs(logDir)
+	if !strings.HasPrefix(absPath, absLogDir) {
+		writeError(w, http.StatusForbidden, "path traversal denied")
+		return
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "file not found")
+		return
+	}
+
+	// Determine content type by extension
+	contentType := "text/plain; charset=utf-8"
+	if strings.HasSuffix(filename, ".json") {
+		contentType = "application/json; charset=utf-8"
+	} else if strings.HasSuffix(filename, ".jsonl") {
+		contentType = "application/jsonl; charset=utf-8"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Write(data)
 }

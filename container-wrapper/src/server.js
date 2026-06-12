@@ -5,7 +5,8 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
-import { listMcpTools, callMcpTool } from "./mcp-client.js";
+import { execSync } from "child_process";
+import { createLLMLogger } from "./llm-logger.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
@@ -13,9 +14,14 @@ mkdirSync(workspaceDir, { recursive: true });
 
 const env = new NodeExecutionEnv({ cwd: workspaceDir });
 
+// LLM logger setup
+const logsDir = process.env.LOGS_DIR || "/logs";
+const instanceId = process.env.INSTANCE_ID || "unknown";
+const logger = createLLMLogger(logsDir, instanceId);
+
 // ---- Built-in tools ----
 
-const builtinTools = [
+const tools = [
   {
     name: "bash",
     description: "Execute a shell command in the workspace. Returns stdout, stderr, and exit code.",
@@ -185,69 +191,8 @@ const builtinTools = [
     },
   },
 ];
-  
-// ---- MCP extension loading ----
-const mcpToolConfigs = {}; // tool_name -> handler config
-const mcpDiscoveredTools = []; // MCP tools with execute callbacks, populated progressively
 
-function startMcpDiscovery() {
-  const extPath = resolve("/app/extensions/extensions.json");
-  if (!existsSync(extPath)) {
-    console.log("No extensions.json found at", extPath);
-    return;
-  }
-  const extConfigs = JSON.parse(readFileSync(extPath, "utf-8"));
-  console.log(`Starting MCP discovery for ${extConfigs.length} extension configs`);
-
-  const mcpConfigs = extConfigs.filter(cfg => cfg.handler && cfg.handler.type === "mcp");
-  const seen = new Set(builtinTools.map(t => t.name));
-
-  for (const cfg of mcpConfigs) {
-    const h = cfg.handler;
-    listMcpTools({
-      transport: h.transport || "stdio",
-      command: h.command,
-      args: h.args || [],
-      env: h.env || {},
-      url: h.url || "",
-    })
-      .then(tools => {
-        let added = 0;
-        for (const t of tools) {
-          if (seen.has(t.name)) {
-            console.log(`MCP "${cfg.name}": skipping duplicate tool "${t.name}"`);
-            continue;
-          }
-          seen.add(t.name);
-          mcpToolConfigs[t.name] = h;
-          mcpDiscoveredTools.push({
-            name: t.name,
-            description: t.description || "",
-            parameters: t.inputSchema || { type: "object", properties: {} },
-            execute: async (args, { signal }) => {
-              const result = await callMcpTool({
-                transport: h.transport || "stdio",
-                command: h.command,
-                args: h.args || [],
-                env: h.env || {},
-                toolName: t.name,
-                toolArgs: args,
-                signal,
-              });
-              return result;
-            },
-          });
-          added++;
-        }
-        console.log(`MCP "${cfg.name}": added ${added} tools (total MCP: ${mcpDiscoveredTools.length})`);
-      })
-      .catch(err => {
-        console.error(`MCP "${cfg.name}": discovery failed - ${err.message || err}`);
-      });
-  }
-}
-
-function setupAgent(extraTools = []) {
+function setupAgent() {
   const provider = process.env.AGENT_PROVIDER || "openai-codex";
   const modelId = process.env.AGENT_MODEL || "gpt-5.1-codex-max";
   const apiKey = process.env.AGENT_API_KEY || process.env.OPENAI_API_KEY || "";
@@ -266,8 +211,6 @@ function setupAgent(extraTools = []) {
 
   if (!model) {
     console.error(`Falling back to default model for ${provider}/${modelId}`);
-    // Use anthropic-messages for custom endpoints with API keys,
-    // openai-codex-responses for ChatGPT backend (JWT-based auth)
     const api = baseUrl ? "anthropic-messages" : "openai-codex-responses";
     model = {
       id: modelId,
@@ -295,54 +238,87 @@ function setupAgent(extraTools = []) {
     },
     initialState: {
       model,
-      tools: [...builtinTools, ...extraTools],
+      tools,
     },
   });
 
-  // Log available extensions and skills dirs
-  const skillsDir = resolve(process.env.SKILLS_DIR || "/app/pi-skills");
-  if (existsSync(skillsDir)) {
-    console.log(`Skills dir: ${skillsDir}`);
-  }
-  const promptsDir = resolve(process.env.PROMPTS_DIR || "/app/pi-prompts");
-  if (existsSync(promptsDir)) {
-    console.log(`Prompts dir: ${promptsDir}`);
-  }
-  const extensionsDir = resolve(process.env.EXTENSIONS_DIR || "/app/extensions");
-  if (existsSync(extensionsDir)) {
-    console.log(`Extensions dir: ${extensionsDir}`);
-  }
-
-  return agent;
+  return { agent, model };
 }
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 
-// ---- API call logging ----
+// ---- API call logging (fetch monkey-patch + file logging) ----
+let activeSeq = null;
+
 const _fetch = globalThis.fetch;
 globalThis.fetch = async (url, opts) => {
   const start = Date.now();
-  const method = opts?.method || 'GET';
-  const body = opts?.body ? (typeof opts.body === 'string' ? opts.body.substring(0, 500) : '[stream]') : '';
-  console.log(`[API] --> ${method} ${url} body=${body}`);
+  const method = opts?.method || "GET";
+
+  // Log request to file if we're in an active logging session
+  if (activeSeq) {
+    const bodyStr = opts?.body;
+    let parsedBody = "";
+    try {
+      parsedBody = bodyStr ? JSON.parse(typeof bodyStr === "string" ? bodyStr : "[stream]") : "";
+    } catch {
+      parsedBody = typeof bodyStr === "string" ? bodyStr.substring(0, 2000) : "[stream]";
+    }
+    logger.logRequest(activeSeq, {
+      method,
+      url,
+      body: parsedBody,
+    });
+  }
+
+  console.log(`[API] --> ${method} ${url} body=${typeof opts?.body === "string" ? opts.body.substring(0, 500) : "[stream]"}`);
+
   try {
     const resp = await _fetch(url, opts);
     const clone = resp.clone();
-    const text = await clone.text();
     const elapsed = Date.now() - start;
+
+    // Log response to file (read full SSE text for PI agent)
+    if (activeSeq) {
+      const text = await clone.text();
+      const isStream = resp.headers.get("content-type")?.includes("text/event-stream");
+      if (isStream) {
+        const lines = text.split("\n").filter(Boolean);
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              logger.appendResponseLine(activeSeq, data);
+            } catch {
+              logger.appendResponseLine(activeSeq, { raw: line });
+            }
+          }
+        }
+      }
+      logger.appendResponseLine(activeSeq, {
+        type: "http_response",
+        status: resp.status,
+        elapsed_ms: elapsed,
+        content_type: resp.headers.get("content-type"),
+      });
+    }
+
     console.log(`[API] <-- ${resp.status} ${elapsed}ms body=${text.substring(0, 2000)}`);
     return resp;
   } catch (e) {
+    if (activeSeq) {
+      logger.appendResponseLine(activeSeq, { type: "fetch_error", message: e.message });
+    }
     console.log(`[API] <-- ERROR ${Date.now() - start}ms ${e.message}`);
     throw e;
   }
 };
 
-let agent;
+let agentState;
 
 app.get("/status", (req, res) => {
-  res.json({ status: "running", ready: !!agent, provider: process.env.AGENT_PROVIDER || "openai-codex", model: process.env.AGENT_MODEL || "gpt-5.1-codex-max" });
+  res.json({ status: "running", ready: !!agentState, provider: process.env.AGENT_PROVIDER || "openai-codex", model: process.env.AGENT_MODEL || "gpt-5.1-codex-max" });
 });
 
 app.get("/health", (req, res) => {
@@ -355,11 +331,18 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "message required" });
   }
 
-  if (!agent) {
-    const mcpTools = [...mcpDiscoveredTools];
-    console.log(`Agent init: ${builtinTools.length} builtin + ${mcpTools.length} MCP tools`);
-    agent = setupAgent(mcpTools);
+  if (!agentState) {
+    agentState = setupAgent();
   }
+
+  // Init logging session and write snapshots
+  logger.newSession();
+  logger.writeToolsSnapshot(tools);
+  const skillsDir = process.env.SKILLS_DIR || "/app/pi-skills";
+  const promptsDir = process.env.PROMPTS_DIR || "/app/pi-prompts";
+  logger.writeSkillsSnapshot(skillsDir);
+  logger.writePromptsSnapshot(promptsDir);
+  activeSeq = logger.nextSeq();
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -370,98 +353,43 @@ app.post("/chat", async (req, res) => {
   }
 
   try {
-    // ── throttle message_update deltas to avoid one WS message per token ──
-    let agentEnded = false;
-    let throttleTimer = null;
-    let latestMsgUpdate = null;
-
-    function flush() {
-      if (latestMsgUpdate) {
-        sendEvent(latestMsgUpdate.type, latestMsgUpdate);
-        latestMsgUpdate = null;
-      }
-      throttleTimer = null;
-    }
-
-    agent.subscribe((event) => {
-      // Skip metadata events — frontend doesn't render these.
-      if (
-        event.type === 'agent_start' ||
-        event.type === 'turn_start' ||
-        event.type === 'message_start' ||
-        event.type === 'turn_end'
-      ) {
-        return;
-      }
-
-      // Standalone text_delta: wrap as message_update so the frontend renders it.
-      if (event.type === 'text_delta') {
-        sendEvent('message_update', {
-          assistantMessageEvent: {
-            type: 'text_delta',
-            delta: event.delta || event.text || '',
-          },
-        });
-        return;
-      }
-
-      // Agent emits its own agent_end (with full messages array).
-      // Track it so we don't send a duplicate.
-      if (event.type === 'agent_end') {
-        agentEnded = true;
-        if (throttleTimer) { clearTimeout(throttleTimer); flush(); }
-        sendEvent(event.type, event);
-        return;
-      }
-
-      // Throttle message_update delta events to 50 ms batches.
-      // Each LLM token is a separate event — sending the latest one
-      // every 50 ms preserves the streaming feel while cutting ~80 % of frames.
-      if (event.type === 'message_update') {
-        const me = event.assistantMessageEvent;
-        if (me && (me.type === 'thinking_delta' || me.type === 'text_delta')) {
-          latestMsgUpdate = event;
-          if (!throttleTimer) {
-            throttleTimer = setTimeout(flush, 50);
-          }
-          return;
-        }
-        // Non-delta message_update (start / end) — flush pending first.
-        if (throttleTimer) { clearTimeout(throttleTimer); flush(); }
-      }
-
+    agentState.agent.subscribe((event) => {
       sendEvent(event.type, event);
     });
 
-    await agent.prompt(message);
-
-    // Flush any remaining throttled event.
-    if (throttleTimer) { clearTimeout(throttleTimer); flush(); }
-
-    // Only emit explicit agent_end if the agent didn't already send one.
-    if (!agentEnded) {
-      sendEvent("agent_end", { stopReason: "end_turn" });
-    }
+    await agentState.agent.prompt(message);
+    sendEvent("agent_end", { stopReason: "end_turn" });
+    logger.appendResponseLine(activeSeq, { type: "agent_end", stopReason: "end_turn" });
   } catch (err) {
     sendEvent("error", { message: err.message });
+    logger.appendResponseLine(activeSeq, { type: "fatal_error", message: err.message, stack: err.stack });
   } finally {
+    activeSeq = null;
     res.end();
   }
 });
 
 app.post("/abort", (req, res) => {
-  if (agent) {
-    agent.abort();
+  if (agentState) {
+    agentState.agent.abort();
     res.json({ status: "aborted" });
   } else {
     res.json({ status: "no active agent" });
   }
 });
 
+// Write initial snapshots on startup
+const startupSkillsDir = process.env.SKILLS_DIR || "/app/pi-skills";
+const startupPromptsDir = process.env.PROMPTS_DIR || "/app/pi-prompts";
+if (startupSkillsDir || startupPromptsDir) {
+  logger.newSession();
+  logger.writeSkillsSnapshot(startupSkillsDir);
+  logger.writePromptsSnapshot(startupPromptsDir);
+}
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Agent wrapper listening on port ${port}`);
   console.log(`Workspace: ${workspaceDir}`);
-  console.log(`Starting with ${builtinTools.length} builtin tools`);
-  startMcpDiscovery();
+  console.log(`Logs: ${logsDir}/${instanceId}`);
 });

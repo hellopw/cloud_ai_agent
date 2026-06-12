@@ -1,17 +1,22 @@
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
-import * as fs from "fs";
+import { readFileSync, existsSync, mkdirSync } from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
-import { listMcpTools, callMcpTool } from "./mcp-client.js";
+import { createLLMLogger } from "./llm-logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
-fs.mkdirSync(workspaceDir, { recursive: true });
+mkdirSync(workspaceDir, { recursive: true });
+
+// LLM logger setup
+const logsDir = process.env.LOGS_DIR || "/logs";
+const instanceId = process.env.INSTANCE_ID || "unknown";
+const logger = createLLMLogger(logsDir, instanceId);
 
 // ---- Built-in tools ----
-const builtinTools = [
+const tools = [
   {
     name: "bash",
     description: "Execute a shell command in the workspace. Returns stdout, stderr, and exit code.",
@@ -96,58 +101,7 @@ const builtinTools = [
   },
 ];
 
-// ---- MCP extension loading ----
-const mcpToolConfigs = {}; // tool_name -> handler config
-let allTools = [...builtinTools]; // start with builtins, MCP added progressively
-
-function startMcpDiscovery() {
-  const extPath = path.resolve("/app/extensions/extensions.json");
-  if (!fs.existsSync(extPath)) {
-    console.log("No extensions.json found at", extPath);
-    return;
-  }
-  const extConfigs = JSON.parse(fs.readFileSync(extPath, "utf-8"));
-  console.log(`Starting MCP discovery for ${extConfigs.length} extension configs`);
-
-  const mcpConfigs = extConfigs.filter(cfg => cfg.handler && cfg.handler.type === "mcp");
-  const seen = new Set(builtinTools.map(t => t.name));
-
-  // Discover each MCP server independently – tools are added as they arrive
-  for (const cfg of mcpConfigs) {
-    listMcpTools({
-      transport: cfg.handler.transport || "stdio",
-      command: cfg.handler.command,
-      args: cfg.handler.args || [],
-      env: cfg.handler.env || {},
-      url: cfg.handler.url || "",
-    })
-      .then(tools => {
-        let added = 0;
-        for (const t of tools) {
-          if (seen.has(t.name)) {
-            console.log(`MCP "${cfg.name}": skipping duplicate tool "${t.name}"`);
-            continue;
-          }
-          seen.add(t.name);
-          mcpToolConfigs[t.name] = cfg.handler;
-          allTools.push({
-            name: t.name,
-            description: t.description || "",
-            input_schema: t.inputSchema || { type: "object", properties: {} },
-          });
-          added++;
-        }
-        console.log(`MCP "${cfg.name}": added ${added} tools (total: ${allTools.length})`);
-      })
-      .catch(err => {
-        console.error(`MCP "${cfg.name}": discovery failed - ${err.message || err}`);
-      });
-  }
-}
-
-function getTools() {
-  return allTools;
-}
+// Tool execution
 async function executeTool(name, input) {
   switch (name) {
     case "bash": {
@@ -161,21 +115,23 @@ async function executeTool(name, input) {
     }
     case "read_file": {
       const p = input.path.startsWith("/") ? input.path : path.join(workspaceDir, input.path);
-      if (!fs.existsSync(p)) return `Error: file not found: ${p}`;
-      return fs.readFileSync(p, "utf-8");
+      if (!existsSync(p)) return `Error: file not found: ${p}`;
+      return readFileSync(p, "utf-8");
     }
     case "write_file": {
       const p = input.path.startsWith("/") ? input.path : path.join(workspaceDir, input.path);
+      const fs = await import("fs");
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, input.content, "utf-8");
       return "File written successfully.";
     }
     case "edit_file": {
       const p = input.path.startsWith("/") ? input.path : path.join(workspaceDir, input.path);
-      if (!fs.existsSync(p)) return `Error: file not found: ${p}`;
-      const content = fs.readFileSync(p, "utf-8");
+      if (!existsSync(p)) return `Error: file not found: ${p}`;
+      const content = readFileSync(p, "utf-8");
       if (!content.includes(input.old_string)) return "Error: old_string not found in file.";
       const newContent = content.replace(input.old_string, input.new_string);
+      const fs = await import("fs");
       fs.writeFileSync(p, newContent, "utf-8");
       return "File edited successfully.";
     }
@@ -197,6 +153,7 @@ async function executeTool(name, input) {
     case "list_files": {
       try {
         const listPath = input.path || workspaceDir;
+        const fs = await import("fs");
         const entries = fs.readdirSync(listPath, { withFileTypes: true });
         return entries.map(f => `${f.isDirectory() ? "d" : "-"} ${f.name} (${f.isFile() ? fs.statSync(path.join(listPath, f.name)).size : 0} bytes)`).join("\n") || "(empty)";
       } catch (e) {
@@ -212,52 +169,12 @@ async function executeTool(name, input) {
       }
     }
     default:
-      // Route to MCP if registered
-      if (mcpToolConfigs[name]) {
-        const cfg = mcpToolConfigs[name];
-        try {
-          const result = await callMcpTool({
-            transport: cfg.transport || "stdio",
-            command: cfg.command,
-            args: cfg.args || [],
-            env: cfg.env || {},
-            toolName: name,
-            toolArgs: input,
-          });
-          if (result.isError) {
-            return `MCP error: ${result.content?.[0]?.text || JSON.stringify(result)}`;
-          }
-          return result.content?.map(c => c.text).join("\n") || JSON.stringify(result);
-        } catch (e) {
-          return `MCP tool "${name}" error: ${e.message}`;
-        }
-      }
       return `Unknown tool: ${name}`;
   }
 }
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
-
-// ---- API call logging ----
-const _fetch = globalThis.fetch;
-globalThis.fetch = async (url, opts) => {
-  const start = Date.now();
-  const method = opts?.method || "GET";
-  const body = opts?.body ? (typeof opts.body === "string" ? opts.body.substring(0, 500) : "[stream]") : "";
-  console.log(`[API] --> ${method} ${url} body=${body}`);
-  try {
-    const resp = await _fetch(url, opts);
-    const clone = resp.clone();
-    const text = await clone.text();
-    const elapsed = Date.now() - start;
-    console.log(`[API] <-- ${resp.status} ${elapsed}ms body=${text.substring(0, 2000)}`);
-    return resp;
-  } catch (e) {
-    console.log(`[API] <-- ERROR ${Date.now() - start}ms ${e.message}`);
-    throw e;
-  }
-};
 
 app.get("/status", (req, res) => {
   const provider = process.env.AGENT_PROVIDER || "anthropic";
@@ -277,6 +194,7 @@ app.post("/chat", async (req, res) => {
 
   const apiKey = process.env.AGENT_API_KEY || "";
   const modelId = process.env.AGENT_MODEL || "claude-sonnet-4-20250514";
+  const provider = process.env.AGENT_PROVIDER || "anthropic";
   const baseUrl = process.env.AGENT_BASE_URL || undefined;
 
   const client = new Anthropic({ apiKey, baseURL: baseUrl });
@@ -290,6 +208,15 @@ app.post("/chat", async (req, res) => {
   }
 
   try {
+    // Init logging session and write snapshots
+    logger.newSession();
+    logger.writeToolsSnapshot(tools);
+
+    const skillsDir = process.env.SKILLS_DIR || "/app/skills";
+    const promptsDir = process.env.PROMPTS_DIR || "/app/prompts";
+    logger.writeSkillsSnapshot(skillsDir);
+    logger.writePromptsSnapshot(promptsDir);
+
     const messages = [{ role: "user", content: message }];
 
     let turnCount = 0;
@@ -298,35 +225,52 @@ app.post("/chat", async (req, res) => {
     while (turnCount < maxTurns) {
       turnCount++;
 
+      const seq = logger.nextSeq();
+      const requestPayload = {
+        provider,
+        model: modelId,
+        baseUrl: baseUrl || "https://api.anthropic.com",
+        system: "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.",
+        messages,
+        tools,
+        max_tokens: 16000,
+      };
+      logger.logRequest(seq, requestPayload);
+
       const stream = client.messages.stream({
         model: modelId,
         max_tokens: 16000,
-        system: "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.",
+        system: requestPayload.system,
         messages,
-        tools: getTools(),
+        tools,
       });
 
-      let contentBlocks = []; // { index, type, id, name, input }
+      let toolUseBlocks = [];
+      let streamError = null;
 
       for await (const event of stream) {
         switch (event.type) {
           case "message_start":
             sendEvent("message_start", event.message);
+            logger.appendResponseLine(seq, { type: event.type, message: event.message });
             break;
           case "content_block_start":
-            contentBlocks.push({
+            logger.appendResponseLine(seq, {
+              type: event.type,
               index: event.index,
-              type: event.content_block.type,
-              id: event.content_block.id,
-              name: event.content_block.name,
-              input: "",
+              content_block: event.content_block,
             });
+            if (event.content_block.type === "tool_use") {
+              toolUseBlocks.push({ id: event.content_block.id, name: event.content_block.name, input: "" });
+            }
             break;
-          case "content_block_delta": {
-            const block = contentBlocks.find(b => b.index === event.index);
-            if (!block) break;
+          case "content_block_delta":
+            logger.appendResponseLine(seq, {
+              type: event.type,
+              index: event.index,
+              delta: event.delta,
+            });
             if (event.delta.type === "thinking_delta") {
-              block.input += event.delta.thinking;
               sendEvent("message_update", {
                 assistantMessageEvent: {
                   type: "thinking_delta",
@@ -334,7 +278,6 @@ app.post("/chat", async (req, res) => {
                 },
               });
             } else if (event.delta.type === "text_delta") {
-              block.input += event.delta.text;
               sendEvent("message_update", {
                 assistantMessageEvent: {
                   type: "text_delta",
@@ -342,55 +285,50 @@ app.post("/chat", async (req, res) => {
                 },
               });
             } else if (event.delta.type === "input_json_delta") {
-              if (event.delta.partial_json) {
+              const block = toolUseBlocks.find(b => b.id === event.index);
+              if (block && event.delta.partial_json) {
                 block.input += event.delta.partial_json;
               }
             }
             break;
-          }
           case "content_block_stop":
+            logger.appendResponseLine(seq, { type: event.type, index: event.index });
             break;
           case "message_delta":
             sendEvent("message_update", { message_delta: event.delta });
+            logger.appendResponseLine(seq, { type: event.type, delta: event.delta });
             break;
           case "message_stop":
+            logger.appendResponseLine(seq, { type: event.type });
             break;
+          case "error":
+            streamError = event.error;
+            logger.appendResponseLine(seq, { type: "error", error: event.error });
+            break;
+          default:
+            logger.appendResponseLine(seq, event);
         }
       }
 
-      let toolUses = [];
-      let assistantContent = [];
       const finalMessage = stream.finalMessage();
-      if (finalMessage && finalMessage.content) {
-        assistantContent = finalMessage.content;
-        toolUses = finalMessage.content.filter(c => c.type === "tool_use");
+      if (!finalMessage) {
+        logger.appendResponseLine(seq, { type: "end_turn", stop_reason: "no_final_message" });
+        break;
       }
 
-      // Fallback: reconstruct from accumulated streaming blocks if finalMessage lacks tool_use
+      // Check for tool use
+      const toolUses = finalMessage.content.filter(c => c.type === "tool_use");
       if (toolUses.length === 0) {
-        const streamToolUses = contentBlocks.filter(b => b.type === "tool_use" && b.name);
-        if (streamToolUses.length > 0) {
-          assistantContent = contentBlocks.map(b => {
-            if (b.type === "tool_use") {
-              let parsedInput = {};
-              try { parsedInput = JSON.parse(b.input || "{}"); } catch (_) {}
-              return { type: "tool_use", id: b.id, name: b.name, input: parsedInput };
-            }
-            if (b.type === "text") return { type: "text", text: b.input };
-            if (b.type === "thinking") return { type: "thinking", thinking: b.input };
-            return null;
-          }).filter(Boolean);
-          toolUses = assistantContent.filter(c => c.type === "tool_use");
-        }
-      }
-
-      if (toolUses.length === 0) {
-        // No more tools, agent is done
+        logger.appendResponseLine(seq, {
+          type: "end_turn",
+          stop_reason: "end_turn",
+          usage: finalMessage.usage,
+        });
         break;
       }
 
       // Add assistant message with tool uses
-      messages.push({ role: "assistant", content: assistantContent });
+      messages.push({ role: "assistant", content: finalMessage.content });
 
       // Execute tools and add results
       const toolResults = [];
@@ -404,6 +342,13 @@ app.post("/chat", async (req, res) => {
         const result = await executeTool(tu.name, tu.input);
         sendEvent("tool_result", { toolCallId: tu.id, content: result });
 
+        logger.appendResponseLine(seq, {
+          type: "tool_exec_result",
+          tool_use_id: tu.id,
+          tool_name: tu.name,
+          content: result,
+        });
+
         toolResults.push({
           type: "tool_result",
           tool_use_id: tu.id,
@@ -416,6 +361,7 @@ app.post("/chat", async (req, res) => {
 
     sendEvent("agent_end", { stopReason: "end_turn" });
   } catch (err) {
+    logger.appendResponseLine("error", { type: "fatal_error", message: err.message, stack: err.stack });
     sendEvent("error", { message: err.message });
   } finally {
     res.end();
@@ -426,12 +372,20 @@ app.post("/abort", (req, res) => {
   res.json({ status: "no active agent to abort" });
 });
 
+// Write initial snapshots on startup
+const startupSkillsDir = process.env.SKILLS_DIR || "/app/skills";
+const startupPromptsDir = process.env.PROMPTS_DIR || "/app/prompts";
+if (startupSkillsDir || startupPromptsDir) {
+  logger.newSession();
+  logger.writeSkillsSnapshot(startupSkillsDir);
+  logger.writePromptsSnapshot(startupPromptsDir);
+}
+
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   const model = process.env.AGENT_MODEL || "claude-sonnet-4-20250514";
   console.log(`Claude Code wrapper listening on port ${port}`);
   console.log(`Workspace: ${workspaceDir}`);
   console.log(`Model: ${model}`);
-  console.log(`Starting with ${builtinTools.length} builtin tools`);
-  startMcpDiscovery();
+  console.log(`Logs: ${logsDir}/${instanceId}`);
 });
