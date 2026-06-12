@@ -81,7 +81,6 @@ export default function InstancesPage() {
       {error && <p style={{ color: 'var(--danger)', marginBottom: 12 }}>{error}</p>}
 
       <div className="card" style={{ marginBottom: 24 }}>
-        <h3 style={{ marginBottom: 12 }}>Start New Instance (Agent)</h3>
         {models.length === 0 ? (
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
             No model configs yet. Go to <b>Models</b> tab to create one first.
@@ -147,7 +146,11 @@ export default function InstancesPage() {
       ) : (
         <>
           {runningInstances.length > 0 && (
-            <h3 style={{ margin: '24px 0 12px', fontSize: 14 }}>Running</h3>
+            <div style={{
+              fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1,
+              color: 'var(--text-muted)', margin: '28px 0 12px',
+              paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.06)',
+            }}>Running &middot; {runningInstances.length}</div>
           )}
           {runningInstances.map((i: any) => (
         <div key={i.id} className="card card-row">
@@ -171,7 +174,11 @@ export default function InstancesPage() {
       ))}
           {failedInstances.length > 0 && (
             <>
-              <h3 style={{ margin: '24px 0 12px', fontSize: 14, color: 'var(--text-muted)' }}>Failed / Stopped</h3>
+              <div style={{
+                fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1,
+                color: 'var(--text-muted)', margin: '28px 0 12px',
+                paddingBottom: 8, borderBottom: '1px solid rgba(0,0,0,0.06)',
+              }}>Failed / Stopped &middot; {failedInstances.length}</div>
               {failedInstances.map((i: any) => (
                 <div key={i.id} className="card card-row" style={{ opacity: 0.7 }}>
                   <div>

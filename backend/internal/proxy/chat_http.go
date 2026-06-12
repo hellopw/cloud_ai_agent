@@ -67,4 +67,3 @@ func HandleChatHTTP(containerHost string, containerPort int) http.HandlerFunc {
 		}
 	}
 }
-

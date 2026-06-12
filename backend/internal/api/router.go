@@ -28,130 +28,190 @@ func NewRouter(h *Handler) http.Handler {
 
 	mux.HandleFunc("/api/prompts", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listPrompts(w, r)
-		case "POST": h.createPrompt(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listPrompts(w, r)
+		case "POST":
+			h.createPrompt(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/prompts/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/prompts/")
 		switch r.Method {
-		case "GET": h.getPrompt(w, r, id)
-		case "PUT": h.updatePrompt(w, r, id)
-		case "DELETE": h.deletePrompt(w, r, id)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getPrompt(w, r, id)
+		case "PUT":
+			h.updatePrompt(w, r, id)
+		case "DELETE":
+			h.deletePrompt(w, r, id)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/skills", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listSkills(w, r)
-		case "POST": h.createSkill(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listSkills(w, r)
+		case "POST":
+			h.createSkill(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/skills/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/skills/")
 		switch r.Method {
-		case "GET": h.getSkill(w, r, id)
-		case "PUT": h.updateSkill(w, r, id)
-		case "DELETE": h.deleteSkill(w, r, id)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getSkill(w, r, id)
+		case "PUT":
+			h.updateSkill(w, r, id)
+		case "DELETE":
+			h.deleteSkill(w, r, id)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/tools", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listTools(w, r)
-		case "POST": h.createTool(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listTools(w, r)
+		case "POST":
+			h.createTool(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/tools/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/tools/")
 		switch r.Method {
-		case "GET": h.getTool(w, r, id)
-		case "PUT": h.updateTool(w, r, id)
-		case "DELETE": h.deleteTool(w, r, id)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getTool(w, r, id)
+		case "PUT":
+			h.updateTool(w, r, id)
+		case "DELETE":
+			h.deleteTool(w, r, id)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/memories", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listMemories(w, r)
-		case "POST": h.createMemory(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listMemories(w, r)
+		case "POST":
+			h.createMemory(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/memories/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/memories/")
 		switch r.Method {
-		case "GET": h.getMemory(w, r, id)
-		case "PUT": h.updateMemory(w, r, id)
-		case "DELETE": h.deleteMemory(w, r, id)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getMemory(w, r, id)
+		case "PUT":
+			h.updateMemory(w, r, id)
+		case "DELETE":
+			h.deleteMemory(w, r, id)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/templates", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listTemplates(w, r)
-		case "POST": h.createTemplate(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listTemplates(w, r)
+		case "POST":
+			h.createTemplate(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/templates/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/templates/")
 		if strings.HasSuffix(path, "/bind") {
 			id := strings.TrimSuffix(path, "/bind")
-			if r.Method == "PUT" { h.updateTemplateBindings(w, r, id) } else { methodNotAllowed(w) }
+			if r.Method == "PUT" {
+				h.updateTemplateBindings(w, r, id)
+			} else {
+				methodNotAllowed(w)
+			}
 			return
 		}
 		switch r.Method {
-		case "GET": h.getTemplate(w, r, path)
-		case "PUT": h.updateTemplate(w, r, path)
-		case "DELETE": h.deleteTemplate(w, r, path)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getTemplate(w, r, path)
+		case "PUT":
+			h.updateTemplate(w, r, path)
+		case "DELETE":
+			h.deleteTemplate(w, r, path)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listAgents(w, r)
-		case "POST": h.createAgent(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listAgents(w, r)
+		case "POST":
+			h.createAgent(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/agents/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
 		if strings.HasSuffix(path, "/log") {
 			id := strings.TrimSuffix(path, "/log")
-			if r.Method == "GET" { h.getBuildLog(w, r, id) } else { methodNotAllowed(w) }
+			if r.Method == "GET" {
+				h.getBuildLog(w, r, id)
+			} else {
+				methodNotAllowed(w)
+			}
 			return
 		}
 		if strings.HasSuffix(path, "/build") {
 			id := strings.TrimSuffix(path, "/build")
-			if r.Method == "POST" { h.buildAgent(w, r, id) } else { methodNotAllowed(w) }
+			if r.Method == "POST" {
+				h.buildAgent(w, r, id)
+			} else {
+				methodNotAllowed(w)
+			}
 			return
 		}
 		if strings.HasSuffix(path, "/start") {
 			id := strings.TrimSuffix(path, "/start")
-			if r.Method == "POST" { h.startInstance(w, r, id) } else { methodNotAllowed(w) }
+			if r.Method == "POST" {
+				h.startInstance(w, r, id)
+			} else {
+				methodNotAllowed(w)
+			}
 			return
 		}
 		switch r.Method {
-		case "GET": h.getAgent(w, r, path)
-		case "PUT": h.updateAgent(w, r, path)
-		case "DELETE": h.deleteAgent(w, r, path)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getAgent(w, r, path)
+		case "PUT":
+			h.updateAgent(w, r, path)
+		case "DELETE":
+			h.deleteAgent(w, r, path)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/instances", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listInstances(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listInstances(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/instances/", func(w http.ResponseWriter, r *http.Request) {
@@ -174,65 +234,102 @@ func NewRouter(h *Handler) http.Handler {
 		if strings.HasSuffix(path, "/messages") {
 			id := strings.TrimSuffix(path, "/messages")
 			switch r.Method {
-			case "GET": h.listChatMessages(w, r, id)
-			case "POST": h.createChatMessage(w, r, id)
-			default: methodNotAllowed(w)
+			case "GET":
+				h.listChatMessages(w, r, id)
+			case "POST":
+				h.createChatMessage(w, r, id)
+			default:
+				methodNotAllowed(w)
 			}
 			return
 		}
+		if strings.HasSuffix(path, "/abort") {
+			id := strings.TrimSuffix(path, "/abort")
+			proxy.HandleAbort("localhost", h.getInstancePort(id))(w, r)
+			return
+		}
 		switch r.Method {
-		case "GET": h.getInstance(w, r, path)
-		case "DELETE": h.deleteInstance(w, r, path)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getInstance(w, r, path)
+		case "DELETE":
+			h.deleteInstance(w, r, path)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/provider-configs", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listProviderConfigs(w, r)
-		case "POST": h.createProviderConfig(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listProviderConfigs(w, r)
+		case "POST":
+			h.createProviderConfig(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/provider-configs/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/provider-configs/")
 		switch r.Method {
-		case "GET": h.getProviderConfig(w, r, id)
-		case "PUT": h.updateProviderConfig(w, r, id)
-		case "DELETE": h.deleteProviderConfig(w, r, id)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getProviderConfig(w, r, id)
+		case "PUT":
+			h.updateProviderConfig(w, r, id)
+		case "DELETE":
+			h.deleteProviderConfig(w, r, id)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
 	mux.HandleFunc("/api/agent-teams", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listAgentTeams(w, r)
-		case "POST": h.createAgentTeam(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listAgentTeams(w, r)
+		case "POST":
+			h.createAgentTeam(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/agent-teams/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/api/agent-teams/")
 		if strings.HasSuffix(path, "/log") {
 			id := strings.TrimSuffix(path, "/log")
-			if r.Method == "GET" { h.getTeamBuildLog(w, r, id) } else { methodNotAllowed(w) }
+			if r.Method == "GET" {
+				h.getTeamBuildLog(w, r, id)
+			} else {
+				methodNotAllowed(w)
+			}
 			return
 		}
 		if strings.HasSuffix(path, "/build") {
 			id := strings.TrimSuffix(path, "/build")
-			if r.Method == "POST" { h.buildAgentTeam(w, r, id) } else { methodNotAllowed(w) }
+			if r.Method == "POST" {
+				h.buildAgentTeam(w, r, id)
+			} else {
+				methodNotAllowed(w)
+			}
 			return
 		}
 		if strings.HasSuffix(path, "/start") {
 			id := strings.TrimSuffix(path, "/start")
-			if r.Method == "POST" { h.startTeamInstance(w, r, id) } else { methodNotAllowed(w) }
+			if r.Method == "POST" {
+				h.startTeamInstance(w, r, id)
+			} else {
+				methodNotAllowed(w)
+			}
 			return
 		}
 		switch r.Method {
-		case "GET": h.getAgentTeam(w, r, path)
-		case "PUT": h.updateAgentTeam(w, r, path)
-		case "DELETE": h.deleteAgentTeam(w, r, path)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getAgentTeam(w, r, path)
+		case "PUT":
+			h.updateAgentTeam(w, r, path)
+		case "DELETE":
+			h.deleteAgentTeam(w, r, path)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
@@ -240,18 +337,25 @@ func NewRouter(h *Handler) http.Handler {
 
 	mux.HandleFunc("/api/resources", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
-		case "GET": h.listResources(w, r)
-		case "POST": h.createResource(w, r)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.listResources(w, r)
+		case "POST":
+			h.createResource(w, r)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 	mux.HandleFunc("/api/resources/", func(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.URL.Path, "/api/resources/")
 		switch r.Method {
-		case "GET": h.getResource(w, r, id)
-		case "PUT": h.updateResource(w, r, id)
-		case "DELETE": h.deleteResource(w, r, id)
-		default: methodNotAllowed(w)
+		case "GET":
+			h.getResource(w, r, id)
+		case "PUT":
+			h.updateResource(w, r, id)
+		case "DELETE":
+			h.deleteResource(w, r, id)
+		default:
+			methodNotAllowed(w)
 		}
 	})
 
@@ -260,7 +364,9 @@ func NewRouter(h *Handler) http.Handler {
 
 func (h *Handler) getInstancePort(id string) int {
 	inst, err := h.store.GetInstance(id)
-	if err != nil || inst == nil { return 3001 }
+	if err != nil || inst == nil {
+		return 3001
+	}
 	return inst.HostPort
 }
 
@@ -269,7 +375,10 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		if r.Method == "OPTIONS" { w.WriteHeader(http.StatusNoContent); return }
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

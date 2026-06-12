@@ -109,12 +109,12 @@ func TestAgentTeamsAPI_CRUD(t *testing.T) {
 				Sequence:         0,
 			},
 			{
-				Name:             "code-reviewer",
-				Role:             "worker",
-				AgentTemplateID:  tmpl.ID,
-				ProviderConfigID: pc.ID,
+				Name:                 "code-reviewer",
+				Role:                 "worker",
+				AgentTemplateID:      tmpl.ID,
+				ProviderConfigID:     pc.ID,
 				SystemPromptOverride: "You are a code reviewer",
-				Sequence:         1,
+				Sequence:             1,
 			},
 		},
 	}

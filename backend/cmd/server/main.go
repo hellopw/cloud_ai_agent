@@ -18,7 +18,9 @@ import (
 )
 
 func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" { return v }
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
 	return def
 }
 
@@ -27,13 +29,19 @@ func main() {
 	frontendDir := envOrDefault("FRONTEND_DIR", "frontend")
 
 	s, err := store.New(dbPath)
-	if err != nil { log.Fatalf("Failed to open database: %v", err) }
+	if err != nil {
+		log.Fatalf("Failed to open database: %v", err)
+	}
 	defer s.Close()
 
-	if err := s.Migrate(); err != nil { log.Fatalf("Failed to run migrations: %v", err) }
+	if err := s.Migrate(); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
 	log.Println("Database migrated successfully")
 
-	if err := s.SeedDefaultTools(); err != nil { log.Printf("Warning: seed default tools: %v", err) }
+	if err := s.SeedDefaultTools(); err != nil {
+		log.Printf("Warning: seed default tools: %v", err)
+	}
 
 	h := api.NewHandler(s)
 	agentSvc := service.NewAgentService(s)
@@ -82,5 +90,7 @@ func main() {
 	log.Println("Shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil { log.Fatalf("Failed to server shutdown: %v", err) }
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Failed to server shutdown: %v", err)
+	}
 }

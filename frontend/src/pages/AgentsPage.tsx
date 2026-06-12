@@ -181,7 +181,8 @@ export default function AgentsPage() {
       {showStartDialog === agentId && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 1000,
         }} onClick={() => setShowStartDialog(null)}>
           <div className="card" style={{ width: 400, padding: 24 }} onClick={e => e.stopPropagation()}>

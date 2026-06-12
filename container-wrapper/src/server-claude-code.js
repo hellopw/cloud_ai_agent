@@ -285,15 +285,15 @@ app.post("/chat", async (req, res) => {
       const finalMessage = stream.finalMessage();
       if (!finalMessage) break;
 
+      // Always add the assistant message so it can be persisted
+      messages.push({ role: "assistant", content: finalMessage.content });
+
       // Check for tool use
       const toolUses = finalMessage.content.filter(c => c.type === "tool_use");
       if (toolUses.length === 0) {
         // No more tools, agent is done
         break;
       }
-
-      // Add assistant message with tool uses
-      messages.push({ role: "assistant", content: finalMessage.content });
 
       // Execute tools and add results
       const toolResults = [];
@@ -317,7 +317,9 @@ app.post("/chat", async (req, res) => {
       messages.push({ role: "user", content: toolResults });
     }
 
-    sendEvent("agent_end", { stopReason: "end_turn" });
+    // Include full message history so the frontend can persist assistant
+    // replies even when streamingBlocksRef is empty on agent_end.
+    sendEvent("agent_end", { stopReason: "end_turn", messages });
   } catch (err) {
     sendEvent("error", { message: err.message });
   } finally {

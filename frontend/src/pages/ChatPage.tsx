@@ -1,99 +1,68 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import rehypeHighlight from 'rehype-highlight'
+import 'highlight.js/styles/github-dark.css'
+
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; toolCallId: string; toolName: string; input: any; result?: string }
 
 interface Message {
-  role: 'user' | 'assistant' | 'tool' | 'system'
-  content: string
-  toolCall?: { toolCallId: string; toolName: string; input: any }
+  role: 'user' | 'assistant' | 'system'
+  content: ContentBlock[]
 }
 
-interface ConfigItem {
-  id: string
-  name: string
-  description?: string
-  content?: string
-  label?: string
-  dsl_definition?: string
-}
-
-interface InstanceConfig {
-  prompts: ConfigItem[]
-  skills: ConfigItem[]
-  tools: ConfigItem[]
+/** Return a fresh copy of the blocks array with the last block replaced. */
+function replaceLast(blocks: ContentBlock[], updated: ContentBlock): ContentBlock[] {
+  const copy = [...blocks]
+  copy[copy.length - 1] = updated
+  return copy
 }
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [streamingContent, setStreamingContent] = useState('')
+  const [connected, setConnected] = useState(false)
+  const [streamingBlocks, setStreamingBlocks] = useState<ContentBlock[]>([])
   const [containerInfo, setContainerInfo] = useState<{ provider?: string; model?: string }>({})
   const [instanceInfo, setInstanceInfo] = useState<{ host_port: number; status: string }>({ host_port: 0, status: '' })
-  const [instanceConfig, setInstanceConfig] = useState<InstanceConfig>({ prompts: [], skills: [], tools: [] })
-  const [configOpen, setConfigOpen] = useState(false)
-  const streamingRef = useRef('')
+  const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const rafRef = useRef<number>(0)
-  const needsFlushRef = useRef(false)
+  const streamingBlocksRef = useRef<ContentBlock[]>([])
+  const messageCommittedRef = useRef(false)
   const idRef = useRef(id)
-  const wasThinkingRef = useRef(false)
 
   // Keep idRef in sync so closures always have the correct instance ID
   idRef.current = id
 
-  // Batch update streaming content — at most once per animation frame
-  const flushStreaming = () => {
-    needsFlushRef.current = false
-    setStreamingContent(streamingRef.current)
-  }
-
-  const scheduleContentUpdate = () => {
-    if (!needsFlushRef.current) {
-      needsFlushRef.current = true
-      rafRef.current = requestAnimationFrame(flushStreaming)
-    }
-  }
-
-  const cancelPendingFlush = () => {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current)
-      rafRef.current = 0
-    }
-    needsFlushRef.current = false
-  }
-
   // Persist a chat message to the backend
-  const saveMessage = (role: string, content: string, toolCall?: any) => {
+  const saveMessage = (role: string, content: ContentBlock[]) => {
     const instanceId = idRef.current
-    if (!instanceId || !content) {
-      console.warn('[ChatPage] saveMessage skipped', { instanceId, role, hasContent: !!content })
-      return
-    }
-    const url = '/api/instances/' + instanceId + '/messages'
-    console.log('[ChatPage] saveMessage', { url, role, contentLen: content.length })
-    fetch(url, {
+    if (!instanceId || content.length === 0) return
+    fetch('/api/instances/' + instanceId + '/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role, content, tool_call: toolCall ? JSON.stringify(toolCall) : '' }),
+      body: JSON.stringify({ role, content: JSON.stringify(content) }),
     }).then(r => {
-      if (!r.ok) console.error('[ChatPage] saveMessage failed', r.status, r.statusText)
+      if (!r.ok) console.error('[ChatPage] saveMessage failed', r.status)
     }).catch(e => console.error('[ChatPage] saveMessage error', e))
   }
 
   // Load persisted messages on mount
   useEffect(() => {
     if (!id) return
-    const url = '/api/instances/' + id + '/messages'
-    console.log('[ChatPage] loading messages from', url)
-    fetch(url)
+    fetch('/api/instances/' + id + '/messages')
       .then(r => r.json())
       .then((data: any[]) => {
-        console.log('[ChatPage] loaded messages', data.length)
         if (Array.isArray(data) && data.length > 0) {
           const msgs: Message[] = data.map((m: any) => ({
             role: m.role,
-            content: m.content,
-            toolCall: m.tool_call ? JSON.parse(m.tool_call) : undefined,
+            content: typeof m.content === 'string' ? JSON.parse(m.content)
+              : Array.isArray(m.content) ? m.content
+              : [{ type: 'text', text: String(m.content || '') }],
           }))
           setMessages(msgs)
         }
@@ -102,28 +71,12 @@ export default function ChatPage() {
   }, [id])
 
   useEffect(() => {
-    // Fetch instance info
     fetch('/api/instances/' + id)
       .then(r => r.json())
       .then(data => setInstanceInfo(data))
       .catch(() => {})
   }, [id])
 
-  // Fetch associated prompts, skills, tools
-  useEffect(() => {
-    if (!id) return
-    fetch('/api/instances/' + id + '/config')
-      .then(r => r.json())
-      .then(data => setInstanceConfig({
-        prompts: data.prompts || [],
-        skills: data.skills || [],
-        tools: data.tools || [],
-      }))
-      .catch(() => {})
-  }, [id])
-
-
-  // Fetch container status via backend proxy
   useEffect(() => {
     if (id) {
       fetch('/api/instances/' + id + '/status')
@@ -133,28 +86,288 @@ export default function ChatPage() {
     }
   }, [id])
 
-  // Cleanup on unmount or id change
+  // ── shared event processor (WebSocket + HTTP SSE fallback) ──
+
+  const processEvent = (eventType: string, data: any) => {
+    console.log('[ChatPage] event:', eventType, JSON.stringify(data).substring(0, 100))
+    switch (eventType) {
+      case 'tool_call': {
+        const toolCallId = data.toolCallId || data.id || `tc_${Date.now()}`
+        const toolName = data.toolName || data.name || 'unknown'
+        const input = data.input || data.arguments || {}
+        streamingBlocksRef.current = [
+          ...streamingBlocksRef.current,
+          { type: 'tool_use', toolCallId, toolName, input },
+        ]
+        setStreamingBlocks([...streamingBlocksRef.current])
+        break
+      }
+
+      case 'tool_result': {
+        const resultId = data.toolCallId || data.tool_use_id || data.id || ''
+        const resultContent =
+          typeof data.content === 'string'
+            ? data.content
+            : JSON.stringify(data.content, null, 2)
+        const blocks = streamingBlocksRef.current
+
+        // Find matching tool_use block (last unmatched, prefer exact ID match)
+        let matchIdx = -1
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          const b = blocks[i]
+          if (b.type !== 'tool_use') continue
+          if (b.result !== undefined) continue
+          if (resultId && b.toolCallId === resultId) {
+            matchIdx = i
+            break // exact ID match wins immediately
+          }
+          if (matchIdx === -1) {
+            matchIdx = i // fallback: last unmatched tool_use
+          }
+        }
+
+        if (matchIdx !== -1) {
+          const block = blocks[matchIdx] as ContentBlock & { type: 'tool_use' }
+          const updated: ContentBlock & { type: 'tool_use' } = { ...block, result: resultContent }
+          const copy = [...blocks]
+          copy[matchIdx] = updated
+          streamingBlocksRef.current = copy
+          setStreamingBlocks([...copy])
+        }
+        break
+      }
+
+      case 'message_update': {
+        const me = data?.assistantMessageEvent
+        if (!me) break
+
+        // If the event carries a "partial" with structured content blocks,
+        // use it directly — this is the complete message state from the provider.
+        if (me.partial?.content && Array.isArray(me.partial.content)) {
+          const blocks: ContentBlock[] = []
+          for (const item of me.partial.content) {
+            if (item.type === 'thinking') {
+              blocks.push({ type: 'thinking', thinking: item.thinking || '' })
+            } else if (item.type === 'text') {
+              blocks.push({ type: 'text', text: item.text || '' })
+            } else if (item.type === 'tool_use') {
+              blocks.push({
+                type: 'tool_use',
+                toolCallId: item.id || String(blocks.length),
+                toolName: item.name || 'unknown',
+                input: item.input || {},
+              })
+            }
+          }
+          streamingBlocksRef.current = blocks
+          setStreamingBlocks([...blocks])
+          break
+        }
+
+        // Fallback: delta-by-delta accumulation
+        switch (me.type) {
+          case 'thinking_delta': {
+            const delta = me.delta || ''
+            if (!delta) break
+            const blocks = streamingBlocksRef.current
+            const last = blocks[blocks.length - 1]
+            if (last && last.type === 'thinking') {
+              streamingBlocksRef.current = replaceLast(blocks, { ...last, thinking: last.thinking + delta })
+            } else {
+              streamingBlocksRef.current = [...blocks, { type: 'thinking', thinking: delta }]
+            }
+            setStreamingBlocks([...streamingBlocksRef.current])
+            break
+          }
+          case 'text_delta': {
+            const delta = me.delta || ''
+            if (!delta) break
+            const blocks = streamingBlocksRef.current
+            const last = blocks[blocks.length - 1]
+            if (last && last.type === 'text') {
+              streamingBlocksRef.current = replaceLast(blocks, { ...last, text: last.text + delta })
+            } else {
+              streamingBlocksRef.current = [...blocks, { type: 'text', text: delta }]
+            }
+            setStreamingBlocks([...streamingBlocksRef.current])
+            break
+          }
+        }
+        break
+      }
+
+      case 'agent_end': {
+        console.log('[ChatPage] agent_end received, blocks_len=', streamingBlocksRef.current.length, 'committed=', messageCommittedRef.current, 'hasMessages=', !!data?.messages)
+        if (streamingBlocksRef.current.length > 0) {
+          const blocks = [...streamingBlocksRef.current]
+          if (messageCommittedRef.current) {
+            // message_end already committed — replace with agent_end's data
+            setMessages(msgs => { const copy = [...msgs]; copy[copy.length - 1] = { role: 'assistant', content: blocks }; return copy })
+          } else {
+            setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+            saveMessage('assistant', blocks)
+            messageCommittedRef.current = true
+          }
+        } else if (!messageCommittedRef.current && data?.messages && Array.isArray(data.messages)) {
+          // No streaming blocks built — parse final messages from agent_end payload.
+          console.log('[ChatPage] agent_end: using data.messages fallback, count=', data.messages.length)
+          const lastAssistantMsg = [...data.messages].reverse().find(
+            (m: any) => m.role === 'assistant'
+          )
+          if (lastAssistantMsg?.content && Array.isArray(lastAssistantMsg.content)) {
+            const blocks: ContentBlock[] = []
+            for (const item of lastAssistantMsg.content) {
+              if (item.type === 'thinking') {
+                blocks.push({ type: 'thinking', thinking: item.thinking || '' })
+              } else if (item.type === 'text') {
+                blocks.push({ type: 'text', text: item.text || '' })
+              } else if (item.type === 'tool_use') {
+                blocks.push({
+                  type: 'tool_use',
+                  toolCallId: item.id || String(blocks.length),
+                  toolName: item.name || 'unknown',
+                  input: item.input || {},
+                })
+              } else if (item.type === 'tool_result') {
+                // tool_result blocks carry results in content field
+                blocks.push({
+                  type: 'tool_use',
+                  toolCallId: item.tool_use_id || item.id || String(blocks.length),
+                  toolName: 'tool',
+                  input: {},
+                  result: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
+                })
+              }
+            }
+            if (blocks.length > 0) {
+              setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+              saveMessage('assistant', blocks)
+              messageCommittedRef.current = true
+            }
+          }
+        }
+        streamingBlocksRef.current = []
+        setStreamingBlocks([])
+        break
+      }
+
+      case 'message_end': {
+        if (data?.message?.stopReason === 'error') {
+          setMessages(prev => [
+            ...prev,
+            { role: 'system', content: [{ type: 'text', text: 'Error: ' + (data.message.errorMessage || 'Unknown error') }] },
+          ])
+        } else if (streamingBlocksRef.current.length > 0) {
+          const blocks = [...streamingBlocksRef.current]
+          if (messageCommittedRef.current) {
+            // agent_end committed first — replace with message_end's (more complete) data
+            setMessages(msgs => { const copy = [...msgs]; copy[copy.length - 1] = { role: 'assistant', content: blocks }; return copy })
+          } else {
+            setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+            saveMessage('assistant', blocks)
+          }
+          messageCommittedRef.current = true
+        } else if (data?.message?.content && Array.isArray(data.message.content) && data.message.content.length > 0 && data.message.role !== 'user') {
+          // No streaming happened (e.g. agent returned immediately), or agent_end
+          // already consumed the streaming blocks — parse from message_end payload.
+          const blocks: ContentBlock[] = []
+          for (const item of data.message.content) {
+            if (item.type === 'thinking') {
+              blocks.push({ type: 'thinking', thinking: item.thinking || '' })
+            } else if (item.type === 'text') {
+              blocks.push({ type: 'text', text: item.text || '' })
+            } else if (item.type === 'tool_use') {
+              blocks.push({
+                type: 'tool_use',
+                toolCallId: item.id || String(blocks.length),
+                toolName: item.name || 'unknown',
+                input: item.input || {},
+              })
+            }
+          }
+          if (blocks.length > 0) {
+            if (messageCommittedRef.current) {
+              setMessages(msgs => { const copy = [...msgs]; copy[copy.length - 1] = { role: 'assistant', content: blocks }; return copy })
+            } else {
+              setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+              saveMessage('assistant', blocks)
+            }
+            messageCommittedRef.current = true
+          }
+        }
+        streamingBlocksRef.current = []
+        setStreamingBlocks([])
+        break
+      }
+
+      case 'error': {
+        setMessages(prev => [
+          ...prev,
+          { role: 'system', content: [{ type: 'text', text: 'Error: ' + data.message }] },
+        ])
+        break
+      }
+
+      default:
+        // agent_start, turn_start, turn_end, message_start and other metadata
+        // events are intentionally not rendered — they are internal protocol events.
+        break
+    }
+  }
+
+  // ── WebSocket connection ──
+
   useEffect(() => {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let ws: WebSocket | null = null
+
+    const connect = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const url = `${protocol}//${window.location.host}/api/instances/${id}/chat`
+      ws = new WebSocket(url)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        console.log('[ChatPage] WS connected')
+        setConnected(true)
+      }
+      ws.onclose = () => {
+        console.log('[ChatPage] WS closed')
+        setConnected(false)
+        reconnectTimer = setTimeout(connect, 3000)
+      }
+      ws.onerror = (err) => {
+        console.error('[ChatPage] WS error:', err)
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          processEvent(msg.type, msg.data)
+        } catch (err) {
+          console.error('[ChatPage] WS message error:', err, event.data?.substring?.(0, 200))
+        }
+      }
+    }
+    connect()
     return () => {
-      cancelPendingFlush()
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (ws) ws.close()
+      wsRef.current = null
     }
   }, [id])
 
+  // ── auto-scroll ──
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, streamingContent])
+  }, [messages, streamingBlocks])
 
-  // SSE fallback for when WebSocket is blocked by corporate proxy
+  // ── HTTP SSE fallback ──
+
   const sendViaHttp = async (trimmed: string) => {
-    const instanceId = idRef.current
-    if (!instanceId) {
-      console.error('[ChatPage] sendViaHttp: no instance id')
-      setMessages((prev) => [...prev, { role: 'system', content: 'Error: no instance id' }])
-      return
-    }
-    console.log('[ChatPage] sendViaHttp: sending to', instanceId)
     try {
-      const resp = await fetch('/api/instances/' + instanceId + '/chat-http', {
+      const resp = await fetch('/api/instances/' + id + '/chat-http', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed }),
@@ -168,174 +381,241 @@ export default function ChatPage() {
 
       const decoder = new TextDecoder()
       let buffer = ''
-      let lastEventType = ''
+      let currentEvent = ''
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
-        const rawLines = buffer.split('\n')
-        buffer = rawLines.pop() || ''
-        for (const rawLine of rawLines) {
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const rawLine of lines) {
           const line = rawLine.trim()
-          if (!line) continue
-          try {
-            if (line.startsWith('event: ')) {
-              lastEventType = line.substring(7)
-              continue
-            }
-            if (line.startsWith('data: ')) {
-              const dataStr = line.substring(6)
-              const parsed = JSON.parse(dataStr)
-              processEvent({ type: lastEventType || 'text_delta', data: parsed })
-            }
-          } catch {
-            // Skip malformed lines
+          if (!line) {
+            currentEvent = ''
+            continue
           }
+          if (line.startsWith('event: ')) {
+            currentEvent = line.substring(7).trim()
+          } else if (line.startsWith('data: ')) {
+            const dataStr = line.substring(6)
+            try {
+              const parsed = JSON.parse(dataStr)
+              processEvent(currentEvent || 'text_delta', parsed)
+            } catch { /* skip malformed JSON */ }
+            currentEvent = ''
+          }
+          // Ignore SSE comments (lines starting with ":") and other fields (id, retry)
         }
       }
-      // Process remaining buffer
+
+      // Flush any remaining buffer
       if (buffer.trim()) {
-        try {
-          if (buffer.startsWith('data: ')) {
+        if (buffer.startsWith('data: ')) {
+          try {
             const parsed = JSON.parse(buffer.substring(6))
-            processEvent({ type: 'agent_end', data: parsed })
-          }
-        } catch { /* ignore */ }
+            processEvent(currentEvent || 'agent_end', parsed)
+          } catch { /* ignore */ }
+        }
       }
-      // Signal end of streaming
-      if (streamingRef.current) {
-        setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
-        saveMessage('assistant', streamingRef.current)
+
+      // Safety net: if we still have streaming blocks, commit them
+      if (streamingBlocksRef.current.length > 0 && !messageCommittedRef.current) {
+        setMessages(msgs => [...msgs, { role: 'assistant', content: [...streamingBlocksRef.current] }])
+        saveMessage('assistant', [...streamingBlocksRef.current])
+        messageCommittedRef.current = true
       }
-      cancelPendingFlush()
-      streamingRef.current = ''
-      setStreamingContent('')
+      streamingBlocksRef.current = []
+      setStreamingBlocks([])
     } catch (e: unknown) {
-      console.error('[ChatPage] HTTP fallback error', e)
-      setMessages((prev) => [...prev, {
-        role: 'system',
-        content: 'Error: ' + (e instanceof Error ? e.message : String(e)),
-      }])
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'Error: ' + (e instanceof Error ? e.message : String(e)) }],
+        },
+      ])
     }
   }
 
-  // Shared event processing for both WebSocket and HTTP fallback
-  const processEvent = (eventData: { type: string; data: any }) => {
-    switch (eventData.type) {
-      case 'text_delta':
-        streamingRef.current += (eventData.data.delta || '')
-        scheduleContentUpdate()
-        break
-      case 'tool_call':
-        setMessages((prev) => [...prev, {
-          role: 'tool',
-          content: 'Calling: ' + eventData.data.toolName,
-          toolCall: {
-            toolCallId: eventData.data.toolCallId,
-            toolName: eventData.data.toolName,
-            input: eventData.data.input,
-          },
-        }])
-        saveMessage('tool', 'Calling: ' + eventData.data.toolName, { toolCallId: eventData.data.toolCallId, toolName: eventData.data.toolName, input: eventData.data.input })
-        break
-      case 'tool_result':
-        setMessages((prev) => [...prev, {
-          role: 'system',
-          content: 'Result from tool: ' + JSON.stringify(eventData.data.content).substring(0, 200),
-        }])
-        saveMessage('system', 'Result from tool: ' + JSON.stringify(eventData.data.content).substring(0, 200))
-        break
-      case 'message_update':
-        const me3 = eventData.data?.assistantMessageEvent
-        if (!me3) break
-        switch (me3.type) {
-          case 'thinking_delta':
-            wasThinkingRef.current = true
-            if (!streamingRef.current.startsWith('[Thinking]\n')) {
-              streamingRef.current = '[Thinking]\n' + streamingRef.current
-            }
-            streamingRef.current += (me3.delta || '')
-            scheduleContentUpdate()
-            break
-          case 'text_delta':
-            if (wasThinkingRef.current) {
-              streamingRef.current += '\n\n'
-              wasThinkingRef.current = false
-            }
-            streamingRef.current += (me3.delta || '')
-            scheduleContentUpdate()
-            break
-        }
-        break
-      case 'agent_end':
-        console.log('[ChatPage] processEvent agent_end, streamingLen=' + streamingRef.current.length)
-        if (streamingRef.current) {
-          setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
-          saveMessage('assistant', streamingRef.current)
-        }
-        cancelPendingFlush()
-        streamingRef.current = ''
-        wasThinkingRef.current = false
-        setStreamingContent('')
-        break
-      case 'message_end':
-        const me4 = eventData.data
-        if (me4?.message?.stopReason === 'error') {
-          setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + (me4.message.errorMessage || 'Unknown error') }])
-        } else if (streamingRef.current) {
-          setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
-          saveMessage('assistant', streamingRef.current)
-          cancelPendingFlush()
-          streamingRef.current = ''
-          wasThinkingRef.current = false
-          setStreamingContent('')
-        }
-        break
-      case 'error':
-        if (streamingRef.current) {
-          setMessages((msgs) => [...msgs, { role: 'assistant', content: streamingRef.current }])
-          saveMessage('assistant', streamingRef.current)
-          cancelPendingFlush()
-          streamingRef.current = ''
-          wasThinkingRef.current = false
-          setStreamingContent('')
-        }
-        setMessages((prev) => [...prev, { role: 'system', content: 'Error: ' + eventData.data.message }])
-        break
-      default:
-        setMessages((prev) => [...prev, { role: 'system', content: `[${eventData.type}] ${JSON.stringify(eventData.data).substring(0, 300)}` }])
-    }
-  }
+  const isStreaming = streamingBlocks.length > 0
+
+  // ── send handler ──
 
   const handleSend = () => {
     const trimmed = input.trim()
-    if (!trimmed) return
-    setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
-    saveMessage('user', trimmed)
-    setInput('')
-    sendViaHttp(trimmed)
+    if (!trimmed || isStreaming) {
+      console.log('[ChatPage] handleSend blocked:', { trimmed: !!trimmed, isStreaming })
+      return
+    }
+
+    const wsState = wsRef.current?.readyState
+    console.log('[ChatPage] handleSend:', { trimmed, wsState, isOpen: wsState === WebSocket.OPEN })
+    messageCommittedRef.current = false
+    if (wsState !== WebSocket.OPEN) {
+      setMessages(prev => [...prev, { role: 'user', content: [{ type: 'text', text: trimmed }] }])
+      saveMessage('user', [{ type: 'text', text: trimmed }])
+      setInput('')
+      sendViaHttp(trimmed)
+      return
+    }
+
+    console.log('[ChatPage] handleSend: sending via WebSocket')
+    setMessages(prev => [...prev, { role: 'user', content: [{ type: 'text', text: trimmed }] }])
+    saveMessage('user', [{ type: 'text', text: trimmed }])
+    try {
+      wsRef.current!.send(JSON.stringify({ type: 'chat', message: trimmed }))
+      setInput('')
+    } catch {
+      sendViaHttp(trimmed)
+      setInput('')
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey && !isStreaming && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleSend()
     }
   }
 
+  const handleStop = async () => {
+    try {
+      await fetch('/api/instances/' + id + '/abort', { method: 'POST' })
+    } catch { /* ignore */ }
+    // Commit any partial streaming content as a message
+    if (streamingBlocksRef.current.length > 0) {
+      const blocks = [...streamingBlocksRef.current]
+      setMessages(msgs => [...msgs, { role: 'assistant', content: blocks }])
+      saveMessage('assistant', blocks)
+    }
+    streamingBlocksRef.current = []
+    setStreamingBlocks([])
+  }
+
+  // ── render helpers ──
+
+  const renderBlock = (block: ContentBlock, blockIdx: number) => {
+    switch (block.type) {
+      case 'text':
+        return (
+          <div key={blockIdx} className="chat-markdown">
+            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+              {block.text}
+            </ReactMarkdown>
+          </div>
+        )
+
+      case 'thinking':
+        return (
+          <details key={blockIdx} style={{ marginBottom: 8 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--text-muted)', fontSize: 12, userSelect: 'none' }}>
+              Thinking...
+            </summary>
+            <div
+              style={{
+                whiteSpace: 'pre-wrap',
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                marginTop: 6,
+                paddingLeft: 12,
+                borderLeft: '2px solid var(--border)',
+              }}
+            >
+              {block.thinking}
+            </div>
+          </details>
+        )
+
+      case 'tool_use':
+        return (
+          <details key={blockIdx} style={{ marginBottom: 8 }}>
+            <summary
+              style={{
+                cursor: 'pointer',
+                color: 'var(--warning)',
+                fontSize: 12,
+                fontWeight: 600,
+                userSelect: 'none',
+              }}
+            >
+              Tool: {block.toolName}
+            </summary>
+            <div style={{ marginTop: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Input:</div>
+              <pre
+                style={{
+                  fontSize: 11,
+                  fontFamily: "'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace",
+                  background: 'var(--bg)',
+                  padding: 8,
+                  borderRadius: 4,
+                  overflow: 'auto',
+                  maxHeight: 200,
+                  margin: 0,
+                  color: 'var(--text)',
+                }}
+              >
+                {JSON.stringify(block.input, null, 2)}
+              </pre>
+              {block.result !== undefined && (
+                <>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, marginTop: 8 }}>
+                    Result:
+                  </div>
+                  <pre
+                    style={{
+                      fontSize: 11,
+                      fontFamily: "'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace",
+                      background: 'var(--bg)',
+                      padding: 8,
+                      borderRadius: 4,
+                      overflow: 'auto',
+                      maxHeight: 300,
+                      margin: 0,
+                      color: 'var(--text)',
+                    }}
+                  >
+                    {block.result}
+                  </pre>
+                </>
+              )}
+            </div>
+          </details>
+        )
+    }
+  }
+
+  const hasStreamingText =
+    streamingBlocks.length > 0 &&
+    streamingBlocks[streamingBlocks.length - 1].type !== 'tool_use'
+
+  // ── UI ──
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 64px)' }}>
-      <div style={{
-        padding: '12px 20px',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12,
-        background: 'var(--sidebar-bg)',
-      }}>
-        <Link to="/instances" className="btn btn-ghost" style={{ fontSize: 12 }}>Back</Link>
+      {/* header */}
+      <div
+        style={{
+          padding: '12px 20px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          background: 'rgba(255,255,255,0.30)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        }}
+      >
+        <Link to="/instances" className="btn btn-ghost" style={{ fontSize: 12 }}>
+          Back
+        </Link>
         <h3 style={{ fontSize: 15, margin: 0 }}>Instance {id?.substring(0, 8)}...</h3>
-        <span className="tag tag-ready">connected</span>
+        <span className={`tag ${connected ? 'tag-ready' : 'tag-failed'}`}>
+          {connected ? 'connected' : 'disconnected'}
+        </span>
         {containerInfo.provider && (
           <>
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>|</span>
@@ -345,120 +625,78 @@ export default function ChatPage() {
             )}
           </>
         )}
-        {(instanceConfig.prompts.length > 0 || instanceConfig.skills.length > 0 || instanceConfig.tools.length > 0) && (
-          <>
-            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>|</span>
-            <button
-              onClick={() => setConfigOpen(!configOpen)}
-              className="btn btn-ghost"
-              style={{ fontSize: 12, padding: '2px 8px' }}
-            >
-              Prompts({instanceConfig.prompts.length}) Skills({instanceConfig.skills.length}) Tools({instanceConfig.tools.length})
-            </button>
-          </>
-        )}
       </div>
 
-      {configOpen && (
-        <div style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--bg)',
-          display: 'flex',
-          gap: 24,
-          overflow: 'auto',
-        }}>
-          {instanceConfig.prompts.length > 0 && (
-            <div style={{ minWidth: 200 }}>
-              <h4 style={{ fontSize: 13, margin: '0 0 6px 0' }}>Prompts</h4>
-              {instanceConfig.prompts.map(p => (
-                <div key={p.id} style={{ fontSize: 12, marginBottom: 4 }}>
-                  <strong>{p.name}</strong>
-                  {p.description && <div style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 100, overflow: 'auto' }}>{p.description}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-          {instanceConfig.skills.length > 0 && (
-            <div style={{ minWidth: 200 }}>
-              <h4 style={{ fontSize: 13, margin: '0 0 6px 0' }}>Skills</h4>
-              {instanceConfig.skills.map(s => (
-                <div key={s.id} style={{ fontSize: 12, marginBottom: 4 }}>
-                  <strong>{s.name}</strong>
-                  {s.description && <div style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 100, overflow: 'auto' }}>{s.description}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-          {instanceConfig.tools.length > 0 && (
-            <div style={{ minWidth: 200 }}>
-              <h4 style={{ fontSize: 13, margin: '0 0 6px 0' }}>Tools</h4>
-              {instanceConfig.tools.map(t => (
-                <div key={t.id} style={{ fontSize: 12, marginBottom: 4 }}>
-                  <strong>{t.label || t.name}</strong>
-                  {t.description && <div style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 100, overflow: 'auto' }}>{t.description}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-          {instanceConfig.prompts.length === 0 && instanceConfig.skills.length === 0 && instanceConfig.tools.length === 0 && (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>No prompts, skills, or tools configured for this instance.</span>
-          )}
-        </div>
-      )}
-
+      {/* messages */}
       <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         {messages.map((msg, i) => (
-          <div key={i} style={{
-            marginBottom: 16,
-            display: 'flex',
-            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-          }}>
-            <div style={{
-              maxWidth: '80%',
-              padding: '10px 16px',
-              borderRadius: 'var(--radius)',
-              background: msg.role === 'user' ? 'var(--accent)' :
-                msg.role === 'tool' ? 'rgba(240,192,64,0.1)' :
-                msg.role === 'system' ? 'var(--bg)' : 'var(--card-bg)',
-              color: msg.role === 'user' ? '#fff' : 'var(--text)',
-              border: msg.role !== 'user' ? '1px solid var(--border)' : 'none',
-              fontSize: 13,
-              lineHeight: 1.6,
-            }}>
-              {msg.toolCall && (
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                  Tool: {msg.toolCall.toolName}
-                </div>
-              )}
-              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>
+          <div
+            key={i}
+            style={{
+              marginBottom: 16,
+              display: 'flex',
+              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+            }}
+          >
+            <div
+              style={{
+                maxWidth: '80%',
+                padding: '10px 16px',
+                borderRadius: 'var(--radius)',
+                background:
+                  msg.role === 'user'
+                    ? 'var(--accent)'
+                    : msg.role === 'system'
+                      ? 'var(--bg)'
+                      : 'var(--card-bg)',
+                color: msg.role === 'user' ? 'var(--btn-text)' : 'var(--text)',
+                border: msg.role !== 'user' ? '1px solid var(--border)' : 'none',
+                fontSize: 13,
+                lineHeight: 1.6,
+              }}
+            >
+              {msg.content.map((block, j) => renderBlock(block, j))}
             </div>
           </div>
         ))}
 
-        {streamingContent && (
+        {/* streaming bubble */}
+        {streamingBlocks.length > 0 && (
           <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-start' }}>
-            <div style={{
-              maxWidth: '80%',
-              padding: '10px 16px',
-              borderRadius: 'var(--radius)',
-              background: 'var(--card-bg)',
-              border: '1px solid var(--border)',
-              fontSize: 13,
-              lineHeight: 1.6,
-            }}>
-              <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {streamingContent}
-                <span className="cursor-blink" style={{
-                  display: 'inline-block',
-                  width: 8,
-                  height: 14,
-                  background: 'var(--accent)',
-                  marginLeft: 2,
-                  animation: 'blink 1s step-end infinite',
-                  verticalAlign: 'middle',
-                }} />
-              </div>
+            <div
+              style={{
+                maxWidth: '80%',
+                padding: '10px 16px',
+                borderRadius: 'var(--radius)',
+                background: 'var(--card-bg)',
+                border: '1px solid var(--border)',
+                fontSize: 13,
+                lineHeight: 1.6,
+              }}
+            >
+              {streamingBlocks.map((block, j) => {
+                // For the very last block during streaming, don't render tool_use blocks
+                // without results with the cursor — the result hasn't arrived yet.
+                const isLast = j === streamingBlocks.length - 1
+                return (
+                  <span key={j}>
+                    {renderBlock(block, j)}
+                    {isLast && hasStreamingText && (
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: 8,
+                          height: 14,
+                          background: 'var(--accent)',
+                          marginLeft: 2,
+                          verticalAlign: 'middle',
+                          animation: 'blink 1s step-end infinite',
+                        }}
+                      />
+                    )}
+                  </span>
+                )
+              })}
             </div>
           </div>
         )}
@@ -466,17 +704,29 @@ export default function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      <div style={{
-        padding: '16px 24px',
-        borderTop: '1px solid var(--border)',
-        background: 'var(--sidebar-bg)',
-      }}>
+      {/* input */}
+      <div
+        style={{
+          padding: '16px 24px',
+          borderTop: '1px solid var(--border)',
+          background: 'rgba(255,255,255,0.30)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        }}
+      >
         <div style={{ display: 'flex', gap: 10 }}>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
+            placeholder={
+              isStreaming
+                ? 'Agent is responding...'
+                : connected
+                  ? 'Type a message... (Enter to send, Shift+Enter for new line)'
+                  : 'Disconnected \u2014 start the instance to chat'
+            }
+            disabled={!connected || isStreaming}
             rows={2}
             style={{
               flex: 1,
@@ -490,9 +740,15 @@ export default function ChatPage() {
               resize: 'none',
             }}
           />
-          <button onClick={handleSend} className="btn btn-primary" style={{ alignSelf: 'flex-end' }}>
-            Send
-          </button>
+          {isStreaming ? (
+            <button onClick={handleStop} className="btn btn-danger" style={{ alignSelf: 'flex-end' }}>
+              Stop
+            </button>
+          ) : (
+            <button onClick={handleSend} disabled={!connected} className="btn btn-primary" style={{ alignSelf: 'flex-end', opacity: connected ? 1 : 0.5 }}>
+              Send
+            </button>
+          )}
         </div>
       </div>
 

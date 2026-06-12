@@ -75,7 +75,8 @@ export default function AgentTeamsPage() {
       {showStartDialog && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.2)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           zIndex: 1000,
         }} onClick={() => setShowStartDialog(null)}>
           <div className="card" style={{ width: 400, padding: 24 }} onClick={e => e.stopPropagation()}>
@@ -127,7 +128,7 @@ export default function AgentTeamsPage() {
             <div style={{ marginTop: 12, width: '100%' }}>
               <h4 style={{ marginBottom: 8 }}>Build Log</h4>
               <pre style={{
-                background: '#1a1a2e', color: '#e0e0e0', padding: 12, borderRadius: 6,
+                padding: 12, borderRadius: 6,
                 maxHeight: 400, overflow: 'auto', fontSize: 12, whiteSpace: 'pre-wrap',
               }}>{logContent || 'Build log is empty or not found.'}</pre>
             </div>
