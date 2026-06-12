@@ -307,12 +307,78 @@ app.post("/chat", async (req, res) => {
   }
 
   try {
+    // ── throttle message_update deltas to avoid one WS message per token ──
+    let agentEnded = false;
+    let throttleTimer = null;
+    let latestMsgUpdate = null;
+
+    function flush() {
+      if (latestMsgUpdate) {
+        sendEvent(latestMsgUpdate.type, latestMsgUpdate);
+        latestMsgUpdate = null;
+      }
+      throttleTimer = null;
+    }
+
     agent.subscribe((event) => {
+      // Skip metadata events — frontend doesn't render these.
+      if (
+        event.type === 'agent_start' ||
+        event.type === 'turn_start' ||
+        event.type === 'message_start' ||
+        event.type === 'turn_end'
+      ) {
+        return;
+      }
+
+      // Standalone text_delta: wrap as message_update so the frontend renders it.
+      if (event.type === 'text_delta') {
+        sendEvent('message_update', {
+          assistantMessageEvent: {
+            type: 'text_delta',
+            delta: event.delta || event.text || '',
+          },
+        });
+        return;
+      }
+
+      // Agent emits its own agent_end (with full messages array).
+      // Track it so we don't send a duplicate.
+      if (event.type === 'agent_end') {
+        agentEnded = true;
+        if (throttleTimer) { clearTimeout(throttleTimer); flush(); }
+        sendEvent(event.type, event);
+        return;
+      }
+
+      // Throttle message_update delta events to 50 ms batches.
+      // Each LLM token is a separate event — sending the latest one
+      // every 50 ms preserves the streaming feel while cutting ~80 % of frames.
+      if (event.type === 'message_update') {
+        const me = event.assistantMessageEvent;
+        if (me && (me.type === 'thinking_delta' || me.type === 'text_delta')) {
+          latestMsgUpdate = event;
+          if (!throttleTimer) {
+            throttleTimer = setTimeout(flush, 50);
+          }
+          return;
+        }
+        // Non-delta message_update (start / end) — flush pending first.
+        if (throttleTimer) { clearTimeout(throttleTimer); flush(); }
+      }
+
       sendEvent(event.type, event);
     });
 
     await agent.prompt(message);
-    sendEvent("agent_end", { stopReason: "end_turn" });
+
+    // Flush any remaining throttled event.
+    if (throttleTimer) { clearTimeout(throttleTimer); flush(); }
+
+    // Only emit explicit agent_end if the agent didn't already send one.
+    if (!agentEnded) {
+      sendEvent("agent_end", { stopReason: "end_turn" });
+    }
   } catch (err) {
     sendEvent("error", { message: err.message });
   } finally {
