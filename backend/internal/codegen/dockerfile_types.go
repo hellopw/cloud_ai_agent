@@ -63,6 +63,9 @@ WORKDIR /app
 # Configure npm proxy
 RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy http://10.18.34.194:3128
 
+# Install git client
+RUN apk add --no-cache git
+
 # Install pi packages
 RUN npm init -y && npm install --ignore-scripts @earendil-works/pi-agent-core @earendil-works/pi-ai express
 
@@ -93,6 +96,9 @@ WORKDIR /app
 
 # Configure npm proxy
 RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy http://10.18.34.194:3128
+
+# Install git client
+RUN apk add --no-cache git
 
 # Install Claude Code packages
 RUN npm init -y && npm install --ignore-scripts @anthropic-ai/sdk express
@@ -125,6 +131,9 @@ WORKDIR /app
 # Configure npm proxy
 RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy http://10.18.34.194:3128
 
+# Install git client
+RUN apk add --no-cache git
+
 # Install Codex packages
 RUN npm init -y && npm install --ignore-scripts @modelcontextprotocol/sdk openai express
 
@@ -155,6 +164,9 @@ WORKDIR /app
 
 # Configure npm proxy
 RUN npm config set proxy http://10.18.34.194:3128 && npm config set https-proxy http://10.18.34.194:3128
+
+# Install git client
+RUN apk add --no-cache git
 
 # Install pi packages
 RUN npm init -y && npm install --ignore-scripts @earendil-works/pi-agent-core @earendil-works/pi-ai express
