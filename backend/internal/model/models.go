@@ -30,6 +30,16 @@ type Tool struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+type Memory struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Content     string    `json:"content"`
+	Source      string    `json:"source"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type Template struct {
 	ID                string    `json:"id"`
 	Name              string    `json:"name"`

@@ -12,7 +12,6 @@ async function request(path: string, options?: RequestInit) {
   return res.json()
 }
 
-// Prompts
 export const promptsApi = {
   list: () => request('/prompts'),
   get: (id: string) => request(`/prompts/${id}`),
@@ -21,7 +20,6 @@ export const promptsApi = {
   delete: (id: string) => request(`/prompts/${id}`, { method: 'DELETE' }),
 }
 
-// Skills
 export const skillsApi = {
   list: () => request('/skills'),
   get: (id: string) => request(`/skills/${id}`),
@@ -30,7 +28,6 @@ export const skillsApi = {
   delete: (id: string) => request(`/skills/${id}`, { method: 'DELETE' }),
 }
 
-// Tools
 export const toolsApi = {
   list: () => request('/tools'),
   get: (id: string) => request(`/tools/${id}`),
@@ -39,7 +36,14 @@ export const toolsApi = {
   delete: (id: string) => request(`/tools/${id}`, { method: 'DELETE' }),
 }
 
-// Templates
+export const memoriesApi = {
+  list: () => request('/memories'),
+  get: (id: string) => request(`/memories/${id}`),
+  create: (data: any) => request('/memories', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: any) => request(`/memories/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) => request(`/memories/${id}`, { method: 'DELETE' }),
+}
+
 export const templatesApi = {
   list: () => request('/templates'),
   get: (id: string) => request(`/templates/${id}`),
@@ -49,7 +53,6 @@ export const templatesApi = {
   bind: (id: string, data: any) => request(`/templates/${id}/bind`, { method: 'PUT', body: JSON.stringify(data) }),
 }
 
-// Agents
 export const agentsApi = {
   list: () => request('/agents'),
   get: (id: string) => request(`/agents/${id}`),
@@ -58,14 +61,12 @@ export const agentsApi = {
   delete: (id: string) => request(`/agents/${id}`, { method: 'DELETE' }),
 }
 
-// Instances
 export const instancesApi = {
   list: () => request('/instances'),
   get: (id: string) => request(`/instances/${id}`),
   delete: (id: string) => request(`/instances/${id}`, { method: 'DELETE' }),
 }
 
-// Provider Configs
 export const providerConfigsApi = {
   list: () => request('/provider-configs'),
   get: (id: string) => request(`/provider-configs/${id}`),
@@ -74,7 +75,6 @@ export const providerConfigsApi = {
   delete: (id: string) => request(`/provider-configs/${id}`, { method: 'DELETE' }),
 }
 
-// Resources
 export const resourcesApi = {
   list: () => request('/resources'),
   get: (id: string) => request(`/resources/${id}`),

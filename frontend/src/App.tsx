@@ -5,6 +5,8 @@ import SkillsPage from './pages/SkillsPage'
 import SkillEditPage from './pages/SkillEditPage'
 import ToolsPage from './pages/ToolsPage'
 import ToolEditPage from './pages/ToolEditPage'
+import MemoriesPage from './pages/MemoriesPage'
+import MemoryEditPage from './pages/MemoryEditPage'
 import TemplatesPage from './pages/TemplatesPage'
 import TemplateEditPage from './pages/TemplateEditPage'
 import AgentsPage from './pages/AgentsPage'
@@ -21,6 +23,7 @@ const navItems = [
   { to: '/prompts', label: 'Prompts' },
   { to: '/skills', label: 'Skills' },
   { to: '/tools', label: 'Tools' },
+  { to: '/memories', label: 'Memories' },
   { to: '/templates', label: 'Templates' },
   { to: '/agents', label: 'Agents' },
   { to: '/agent-teams', label: 'Agent Teams' },
@@ -55,6 +58,9 @@ function App() {
           <Route path="/tools" element={<ToolsPage />} />
           <Route path="/tools/new" element={<ToolEditPage />} />
           <Route path="/tools/:id" element={<ToolEditPage />} />
+          <Route path="/memories" element={<MemoriesPage />} />
+          <Route path="/memories/new" element={<MemoryEditPage />} />
+          <Route path="/memories/:id" element={<MemoryEditPage />} />
           <Route path="/templates" element={<TemplatesPage />} />
           <Route path="/templates/new" element={<TemplateEditPage />} />
           <Route path="/templates/:id" element={<TemplateEditPage />} />
