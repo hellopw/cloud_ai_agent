@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { listMcpTools, callMcpTool } from "./mcp-client.js";
 import { createLLMLogger } from "./llm-logger.js";
+import { loadPromptsAsSystemBlocks } from "./prompts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
@@ -348,7 +349,7 @@ app.post("/chat", async (req, res) => {
       const stream = client.messages.stream({
         model: modelId,
         max_tokens: 16000,
-        system: "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.",
+        system: loadPromptsAsSystemBlocks(promptsDir, "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task."),
         messages,
         tools: getTools(),
       });

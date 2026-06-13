@@ -7,6 +7,7 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { listMcpTools, callMcpTool } from "./mcp-client.js";
 import { createLLMLogger } from "./llm-logger.js";
+import { loadPromptsAsString } from "./prompts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
@@ -266,7 +267,7 @@ function startMcpDiscoveryForMember(memberName) {
 
 // ---- Agent setup per member ----
 
-function setupAgent(memberConfig, additionalTools = []) {
+function setupAgent(memberConfig, memberName, additionalTools = []) {
   const { provider, model_id, api_key, base_url, system_prompt_override } = memberConfig;
 
   let model;
@@ -293,6 +294,9 @@ function setupAgent(memberConfig, additionalTools = []) {
 
   const allTools = [...buildBuiltinTools(), ...additionalTools];
 
+  const promptsDir = resolve(`/app/agents/${memberName}/pi-prompts`);
+  const instructions = system_prompt_override || loadPromptsAsString(promptsDir);
+
   const agent = new Agent({
     streamFn: streamSimple,
     transport: "http",
@@ -303,6 +307,7 @@ function setupAgent(memberConfig, additionalTools = []) {
     initialState: {
       model,
       tools: allTools,
+      ...(instructions ? { instructions } : {}),
     },
   });
 
@@ -515,7 +520,7 @@ function getLeaderAgent() {
     }
 
     const mcpTools = mcpToolsCache[leaderName] || [];
-    const result = setupAgent(memberConfigs[leaderName], [getDelegateTool(), ...mcpTools]);
+    const result = setupAgent(memberConfigs[leaderName], leaderName, [getDelegateTool(), ...mcpTools]);
     leaderAgent = result.agent;
     agents[leaderName] = result.agent;
     memberModels[leaderName] = result.model;
@@ -531,7 +536,7 @@ function getLeaderAgent() {
     for (const member of manifest.members) {
       if (member.role !== "leader") {
         const mcpTools = mcpToolsCache[member.name] || [];
-        const result = setupAgent(memberConfigs[member.name], mcpTools);
+        const result = setupAgent(memberConfigs[member.name], member.name, mcpTools);
         agents[member.name] = result.agent;
         memberModels[member.name] = result.model;
         memberTools[member.name] = result.tools;

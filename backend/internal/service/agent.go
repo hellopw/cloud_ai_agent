@@ -133,6 +133,11 @@ func (svc *AgentService) BuildAgent(ctx context.Context, agentID string) error {
 			return err
 		}
 	}
+	// Copy prompts helper to build context root
+	promptsHelperSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "prompts.js")
+	if promptsHelperData, err := os.ReadFile(promptsHelperSrc); err == nil {
+		os.WriteFile(filepath.Join(buildDir, "prompts.js"), promptsHelperData, 0644)
+	}
 
 	// Generate tool extensions
 	if err := svc.writeToolExtensions(buildDir, tmpl.ToolIDs); err != nil {
@@ -370,6 +375,11 @@ func (svc *AgentService) BuildAgentTeam(ctx context.Context, teamID string) erro
 	llmLoggerSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "llm-logger.js")
 	if llmLoggerData, err := os.ReadFile(llmLoggerSrc); err == nil {
 		os.WriteFile(filepath.Join(buildDir, "llm-logger.js"), llmLoggerData, 0644)
+	}
+	// Copy prompts helper
+	promptsHelperSrc := filepath.Join(svc.projectRoot, "container-wrapper", "src", "prompts.js")
+	if promptsHelperData, err := os.ReadFile(promptsHelperSrc); err == nil {
+		os.WriteFile(filepath.Join(buildDir, "prompts.js"), promptsHelperData, 0644)
 	}
 
 	// Build manifest with member configs

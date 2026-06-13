@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { listMcpTools, callMcpTool } from "./mcp-client.js";
 import { createLLMLogger } from "./llm-logger.js";
+import { loadPromptsAsString } from "./prompts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
@@ -335,11 +336,14 @@ app.post("/chat", async (req, res) => {
     while (turnCount < maxTurns) {
       turnCount++;
 
+      const instructions = loadPromptsAsString(promptsDir, "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.");
+
       const stream = await agentState.client.responses.create({
         model: agentState.modelId,
         input: input,
         tools: tools,
         stream: true,
+        ...(instructions ? { instructions } : {}),
       });
 
       let finalResponse = null;

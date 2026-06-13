@@ -21,6 +21,7 @@ RUN npm init -y && npm install --ignore-scripts @modelcontextprotocol/sdk openai
 COPY {{.WrapperScript}} ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
 {{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
+COPY prompts.js ./
 
 # Work directory for code repos and logs (mounted at runtime)
 RUN mkdir -p /workspace /logs

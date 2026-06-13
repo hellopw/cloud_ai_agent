@@ -19,6 +19,7 @@ COPY team-manifest.json ./
 COPY team-server.js ./server.js
 {{if .McpClient}}COPY {{.McpClient}} ./mcp-client.js{{end}}
 {{if .LLMLogger}}COPY {{.LLMLogger}} ./llm-logger.js{{end}}
+COPY prompts.js ./
 
 # Copy each agent's directory
 {{range .AgentDirs}}COPY {{.}}/ ./{{.}}/

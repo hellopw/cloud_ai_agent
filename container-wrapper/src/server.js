@@ -7,6 +7,7 @@ import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { listMcpTools, callMcpTool } from "./mcp-client.js";
 import { createLLMLogger } from "./llm-logger.js";
+import { loadPromptsAsString } from "./prompts.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const workspaceDir = process.env.WORKSPACE_DIR || "/workspace";
@@ -300,6 +301,9 @@ function setupAgent(extraTools = []) {
   console.log(`Agent configured with provider=${provider} model=${modelId}`);
   console.log(`Model: ${JSON.stringify(model)}`);
 
+  const promptsDir = resolve(process.env.PROMPTS_DIR || "/app/pi-prompts");
+  const instructions = loadPromptsAsString(promptsDir, "You are a helpful AI assistant with access to tools for reading/writing files, running commands, and managing git repositories. Use tools when needed to complete the user's task.");
+
   const agent = new Agent({
     streamFn: streamSimple,
     transport: "http",
@@ -310,6 +314,7 @@ function setupAgent(extraTools = []) {
     initialState: {
       model,
       tools: [...builtinTools, ...extraTools],
+      ...(instructions ? { instructions } : {}),
     },
   });
 
@@ -318,7 +323,6 @@ function setupAgent(extraTools = []) {
   if (existsSync(skillsDir)) {
     console.log(`Skills dir: ${skillsDir}`);
   }
-  const promptsDir = resolve(process.env.PROMPTS_DIR || "/app/pi-prompts");
   if (existsSync(promptsDir)) {
     console.log(`Prompts dir: ${promptsDir}`);
   }
